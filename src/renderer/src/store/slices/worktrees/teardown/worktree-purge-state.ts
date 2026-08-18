@@ -147,6 +147,7 @@ export function buildWorktreePurgeState(s: AppState, worktreeIds: string[]): Par
     gitBranchLineTotalByWorktree: omitByWorktree(s.gitBranchLineTotalByWorktree),
     gitIgnoredPathsByWorktree: omitByWorktree(s.gitIgnoredPathsByWorktree),
     gitConflictOperationByWorktree: omitByWorktree(s.gitConflictOperationByWorktree),
+    gitOperationProgressByWorktree: omitByWorktree(s.gitOperationProgressByWorktree),
     trackedConflictPathsByWorktree: omitByWorktree(s.trackedConflictPathsByWorktree),
     gitBranchChangesByWorktree: omitByWorktree(s.gitBranchChangesByWorktree),
     gitBranchCompareSummaryByWorktree: omitByWorktree(s.gitBranchCompareSummaryByWorktree),

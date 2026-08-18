@@ -34,6 +34,7 @@ const WORKTREE_ID_KEYED_MAP_KEYS = [
   'gitBranchLineTotalByWorktree',
   'gitIgnoredPathsByWorktree',
   'gitConflictOperationByWorktree',
+  'gitOperationProgressByWorktree',
   'trackedConflictPathsByWorktree',
   'gitBranchChangesByWorktree',
   'gitBranchCompareSummaryByWorktree',
