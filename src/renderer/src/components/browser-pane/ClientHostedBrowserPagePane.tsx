@@ -20,20 +20,8 @@ import {
   ReopenBrowserPageOnServerButton,
   reopenOnServerCaveat
 } from './ReopenBrowserPageOnServerButton'
-import BrowserAddressBar from './BrowserAddressBar'
-
-export type BrowserTabPageState = Partial<
-  Pick<
-    BrowserPageState,
-    'title' | 'loading' | 'faviconUrl' | 'canGoBack' | 'canGoForward' | 'loadError'
-  >
->
-
-export type BrowserPageUrlSetter = (
-  tabId: string,
-  url: string,
-  options?: { preserveLoadError?: boolean }
-) => void
+import BrowserAddressBar from './assemble-chrome/BrowserAddressBar'
+import type { BrowserPageUrlSetter, BrowserTabPageState } from './describe-page/browser-page-types'
 
 export function ClientHostedBrowserPagePane({
   browserTab,

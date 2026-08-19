@@ -26,7 +26,7 @@ vi.mock('./browser-client-page-renderer-installation', () => ({
   attachBrowserClientPageToViewport: mocks.attach
 }))
 
-vi.mock('./BrowserAddressBar', () => ({
+vi.mock('./assemble-chrome/BrowserAddressBar', () => ({
   default: ({ value }: { value: string }) => <input aria-label="Address" value={value} readOnly />
 }))
 

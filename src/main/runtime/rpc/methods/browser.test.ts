@@ -97,7 +97,8 @@ describe('browser RPC methods', () => {
       makeRequest('browser.profileImportFromBrowser', {
         profileId: 'profile-1',
         browserFamily: 'chrome',
-        browserProfile: 'Default'
+        browserProfile: 'Default',
+        supportsPartitionSkippedCookies: true
       })
     )
 
@@ -121,7 +122,8 @@ describe('browser RPC methods', () => {
     expect(runtime.browserProfileImportFromBrowser).toHaveBeenCalledWith({
       profileId: 'profile-1',
       browserFamily: 'chrome',
-      browserProfile: 'Default'
+      browserProfile: 'Default',
+      supportsPartitionSkippedCookies: true
     })
   })
 
