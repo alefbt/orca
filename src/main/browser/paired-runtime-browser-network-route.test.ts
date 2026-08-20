@@ -487,27 +487,15 @@ describe('PairedRuntimeBrowserNetworkRoute', () => {
     attempts[0]!.callbacks.onClose?.()
     await vi.waitFor(() => expect(attempts).toHaveLength(2))
     ready(attempts[1]!, 8)
-    await vi.waitFor(() => expect(attempts[1]!.close).not.toHaveBeenCalled())
+    // Drive a request through the rebuilt tunnel so the first recovery has fully settled before
+    // the next failure; an in-flight loop would otherwise cover both deaths by itself.
+    await expectSocksRoundTrip(address, attempts[1]!, 8, 'once-recovered.internal')
 
     attempts[1]!.callbacks.onClose?.()
     await vi.waitFor(() => expect(attempts).toHaveLength(3))
     ready(attempts[2]!, 9)
+    await expectSocksRoundTrip(address, attempts[2]!, 9, 'twice-recovered.internal')
 
-    const recovered = await connectSocks(address.host, address.port)
-    await greetSocks(recovered)
-    recovered.write(domainConnectRequest('twice-recovered.internal', 443))
-    await vi.waitFor(() => expect(openFrames(attempts[2]!)).toHaveLength(1))
-    attempts[2]!.callbacks.onBinary?.(
-      encodeBrowserNetworkTunnelFrame({
-        opcode: BrowserNetworkTunnelOpcode.Opened,
-        tunnelGeneration: 9,
-        streamId: 1,
-        payload: new Uint8Array()
-      })
-    )
-    expect(Array.from(await readExact(recovered, 10))).toEqual([5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
-
-    recovered.destroy()
     await route.close()
   })
 
@@ -719,6 +707,29 @@ function openFrames(attempt: SubscriptionAttempt) {
       (frame): frame is NonNullable<typeof frame> =>
         frame?.opcode === BrowserNetworkTunnelOpcode.Open
     )
+}
+
+/** Opens one SOCKS connection end to end, proving the route's current tunnel actually carries it. */
+async function expectSocksRoundTrip(
+  address: { host: string; port: number },
+  attempt: SubscriptionAttempt,
+  tunnelGeneration: number,
+  host: string
+): Promise<void> {
+  const socket = await connectSocks(address.host, address.port)
+  await greetSocks(socket)
+  socket.write(domainConnectRequest(host, 443))
+  await vi.waitFor(() => expect(openFrames(attempt)).toHaveLength(1))
+  attempt.callbacks.onBinary?.(
+    encodeBrowserNetworkTunnelFrame({
+      opcode: BrowserNetworkTunnelOpcode.Opened,
+      tunnelGeneration,
+      streamId: 1,
+      payload: new Uint8Array()
+    })
+  )
+  expect(Array.from(await readExact(socket, 10))).toEqual([5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
+  socket.destroy()
 }
 
 async function connectSocks(host: string, port: number): Promise<Socket> {
