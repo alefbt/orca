@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/store'
-import {
-  normalizeBrowserNavigationUrl,
-  redactKagiSessionToken
-} from '../../../../../shared/browser-url'
+import { redactKagiSessionToken } from '../../../../../shared/browser-url'
+import { resolveBrowserAddressBarSubmission } from '../navigate/browser-address-bar-navigation'
 import { keybindingMatchesAction } from '../../../../../shared/keybindings'
 import type {
   BrowserBackResult,
@@ -250,26 +248,15 @@ export function useRemoteBrowserPageNavigation({
   }, [isActive, keybindings, runRemoteNavigation])
 
   const submitAddressBar = (): void => {
-    const searchEngine = useAppStore.getState().browserDefaultSearchEngine
-    const kagiSessionLink = useAppStore.getState().browserKagiSessionLink
-    const nextUrl = normalizeBrowserNavigationUrl(addressBarValue, searchEngine, {
-      kagiSessionLink
-    })
-    if (!nextUrl) {
-      const message = 'Enter a valid http(s) or localhost URL.'
+    const submission = resolveBrowserAddressBarSubmission(addressBarValue)
+    if (submission.status === 'invalid') {
       // 'direct': the only response to what the user just typed. With an empty address bar no
       // load-error overlay renders either, so outranking this would make Enter do nothing visible.
-      setPaneNotice({ kind: 'direct', text: message })
-      onUpdatePageState(browserTab.id, {
-        loadError: {
-          code: 0,
-          description: message,
-          validatedUrl: redactKagiSessionToken(addressBarValue.trim()) || 'about:blank'
-        }
-      })
+      setPaneNotice({ kind: 'direct', text: submission.loadError.description })
+      onUpdatePageState(browserTab.id, { loadError: submission.loadError })
       return
     }
-    navigateToUrl(nextUrl)
+    navigateToUrl(submission.url)
   }
 
   return {
