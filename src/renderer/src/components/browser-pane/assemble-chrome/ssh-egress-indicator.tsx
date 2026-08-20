@@ -1,8 +1,9 @@
-import { Monitor, Network } from 'lucide-react'
+import { useState } from 'react'
+import { Globe, Monitor, Network } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID } from '@/lib/settings-navigation-types'
 import {
   isRuntimeOwnedSshTargetId,
@@ -11,16 +12,19 @@ import {
 import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
 
 /**
- * Egress locus for SSH-workspace browser tabs: routed tabs and local tabs look
- * identical when working, and per-host opt-outs exist — this chip is the one
- * visible tell of where a page's traffic leaves from. Clicking jumps to the
- * routing setting.
+ * The address bar's leading icon, egress-aware: routed tabs and local tabs
+ * look identical when working, and per-host opt-outs exist, so for SSH
+ * workspaces the globe becomes the one visible tell of where a page's traffic
+ * leaves from. Clicking expands the explanation and a settings link; non-SSH
+ * workspaces keep the plain globe (this component owns the slot either way,
+ * so the fallback lives here rather than in the address bar).
  */
 export function SshEgressIndicator({
   worktreeId
 }: {
   worktreeId: string
 }): React.JSX.Element | null {
+  const [open, setOpen] = useState(false)
   const executionHostId = useAppStore((s) => getExecutionHostIdForWorktree(s, worktreeId))
   const routingEnabled = useAppStore((s) => s.settings?.browserSshWorkspaceRoutingEnabled !== false)
   const disabledTargetIds = useAppStore(
@@ -33,28 +37,60 @@ export function SshEgressIndicator({
   const targetId =
     parsed?.kind === 'ssh' && !isRuntimeOwnedSshTargetId(parsed.targetId) ? parsed.targetId : null
   if (!targetId) {
-    return null
+    return <Globe className="size-4 shrink-0 text-muted-foreground" />
   }
   const routed = routingEnabled && !disabledTargetIds?.includes(targetId)
   const hostLabel = sshTargetLabels.get(targetId) ?? targetId
   const description = routed
-    ? translate('browser.sshEgress.routedTooltip', 'Browsing through {value0}', {
+    ? translate('browser.sshEgress.routedTooltip', 'Browsing through {{value0}}', {
         value0: hostLabel
       })
-    : translate('browser.sshEgress.localTooltip', 'Browsing from this device, not {value0}', {
+    : translate('browser.sshEgress.localTooltip', 'Browsing from this device, not {{value0}}', {
         value0: hostLabel
       })
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 max-w-40 gap-1 px-2 text-xs text-muted-foreground"
+    <Popover modal={false} open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
           aria-label={description}
+          title={description}
           data-testid="ssh-egress-indicator"
           data-egress={routed ? 'ssh' : 'local'}
+          // Why: the address bar form focuses its input on any click inside it.
+          onClick={(event) => event.stopPropagation()}
+        >
+          {routed ? <Network className="size-4" /> : <Monitor className="size-4" />}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="start"
+        sideOffset={8}
+        className="w-72 p-3"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="text-sm font-medium text-foreground">{description}</div>
+        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+          {routed
+            ? translate(
+                'browser.sshEgress.routedDetail',
+                "Network traffic and DNS go through the workspace's SSH host."
+              )
+            : translate(
+                'browser.sshEgress.localDetail',
+                'Pages load from this machine and its network.'
+              )}
+        </div>
+        <Button
+          type="button"
+          variant="link"
+          size="xs"
+          className="mt-1.5 h-auto px-0"
+          data-testid="ssh-egress-indicator-settings"
           onClick={() => {
+            setOpen(false)
             openSettingsTarget({
               pane: 'browser',
               repoId: null,
@@ -63,15 +99,9 @@ export function SshEgressIndicator({
             openSettingsPage()
           }}
         >
-          {routed ? <Network className="size-3.5" /> : <Monitor className="size-3.5" />}
-          <span className="min-w-0 truncate">
-            {routed ? hostLabel : translate('browser.sshEgress.localChip', 'This device')}
-          </span>
+          {translate('browser.sshEgress.settingsLink', 'Routing settings')}
         </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={4}>
-        {description}
-      </TooltipContent>
-    </Tooltip>
+      </PopoverContent>
+    </Popover>
   )
 }

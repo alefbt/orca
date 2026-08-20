@@ -16,6 +16,8 @@ type BrowserAddressBarProps = {
   onNavigate: (url: string) => void
   inputRef: React.RefObject<HTMLInputElement | null>
   dismissSuggestionsRef?: React.MutableRefObject<(() => void) | null>
+  /** Replaces the leading globe (e.g. the SSH egress indicator). */
+  leadingIcon?: React.ReactNode
 }
 
 export default function BrowserAddressBar({
@@ -24,7 +26,8 @@ export default function BrowserAddressBar({
   onSubmit,
   onNavigate,
   inputRef,
-  dismissSuggestionsRef
+  dismissSuggestionsRef,
+  leadingIcon
 }: BrowserAddressBarProps): React.ReactElement {
   const [open, setOpen] = useState(false)
   const [selectedValueOverride, setSelectedValueOverride] = useState<string | null>(null)
@@ -370,7 +373,7 @@ export default function BrowserAddressBar({
               onSubmit()
             }}
           >
-            <Globe className="size-4 shrink-0 text-muted-foreground" />
+            {leadingIcon ?? <Globe className="size-4 shrink-0 text-muted-foreground" />}
             <Input
               ref={inputRef}
               value={value}

@@ -120,6 +120,7 @@ export function BrowserPageToolbar({
       onSubmitAddressBar={submitAddressBar}
       addressBarInputRef={addressBarInputRef}
       dismissSuggestionsRef={dismissAddressBarSuggestionsRef}
+      addressBarLeadingIcon={<SshEgressIndicator worktreeId={worktreeId} />}
       reloadControl={
         <DropdownMenu modal={false} open={reloadMenuOpen} onOpenChange={setReloadMenuOpen}>
           {/* Why: suppress the tooltip while the menu is open — both anchor below the button and would overlap. */}
@@ -266,8 +267,6 @@ export function BrowserPageToolbar({
           createRequest={() => readBrowserHtmlArtifactRequest(currentBrowserUrl)}
         />
       ) : null}
-
-      <SshEgressIndicator worktreeId={worktreeId} />
 
       <Button
         size="icon"

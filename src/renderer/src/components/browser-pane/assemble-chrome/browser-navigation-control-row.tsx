@@ -31,6 +31,7 @@ export function BrowserNavigationControlRow({
   addressBarInputRef,
   dismissSuggestionsRef,
   reloadControl,
+  addressBarLeadingIcon,
   children
 }: {
   controls: BrowserNavigationControls
@@ -40,6 +41,8 @@ export function BrowserNavigationControlRow({
   addressBarInputRef: React.RefObject<HTMLInputElement | null>
   dismissSuggestionsRef?: React.MutableRefObject<(() => void) | null>
   reloadControl?: React.ReactNode
+  /** Replaces the address bar's leading globe (e.g. the SSH egress indicator). */
+  addressBarLeadingIcon?: React.ReactNode
   children?: React.ReactNode
 }): React.JSX.Element {
   return (
@@ -90,6 +93,7 @@ export function BrowserNavigationControlRow({
         onNavigate={controls.navigate}
         inputRef={addressBarInputRef}
         dismissSuggestionsRef={dismissSuggestionsRef}
+        leadingIcon={addressBarLeadingIcon}
       />
 
       {children}

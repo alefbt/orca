@@ -71,9 +71,12 @@
       "showDetails": "Show details"
     },
     "sshEgress": {
-      "routedTooltip": "Browsing through {value0}",
-      "localTooltip": "Browsing from this device, not {value0}",
-      "localChip": "This device"
+      "routedTooltip": "Browsing through {{value0}}",
+      "localTooltip": "Browsing from this device, not {{value0}}",
+      "localChip": "This device",
+      "routedDetail": "Network traffic and DNS go through the workspace's SSH host.",
+      "localDetail": "Pages load from this machine and its network.",
+      "settingsLink": "Routing settings"
     }
   },
   "githubChecks": {
