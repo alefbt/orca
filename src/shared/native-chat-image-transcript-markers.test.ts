@@ -225,6 +225,15 @@ describe('normalizeNativeChatUserText control bytes', () => {
     expect(normalizeNativeChatUserText('\u0015[Image #1] describe this')).toBe('describe this')
   })
 
+  // `buildMobileImagePastePayload` brackets every image path this way, and an
+  // agent without bracketed-paste mode records the markers literally. Stripping
+  // the lone ESC alone would leave `[200~...[201~` behind and still never match.
+  it('drops a bracketed-paste wrapper, not just its ESC introducer', () => {
+    expect(normalizeNativeChatUserText('\u001b[200~/tmp/orca-paste-1.png\u001b[201~')).toBe(
+      '/tmp/orca-paste-1.png'
+    )
+  })
+
   it('leaves tabs, newlines and carriage returns to the whitespace collapse', () => {
     expect(normalizeNativeChatUserText('run\tthe\r\ntests')).toBe('run the tests')
   })

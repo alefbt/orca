@@ -1,4 +1,7 @@
-import { TERMINAL_CONTROL_CHARACTER_PATTERN } from './ansi-escape-sequences'
+import {
+  stripAnsiEscapeSequences,
+  TERMINAL_CONTROL_CHARACTER_PATTERN
+} from './ansi-escape-sequences'
 import { isTextBlock, type NativeChatBlock, type NativeChatMessage } from './native-chat-types'
 
 const IMAGE_SOURCE_MARKER = /^\[Image:\s*source:\s*(.+?)\]\s*$/
@@ -38,15 +41,21 @@ export function stripImagePromptMarker(text: string): string {
 }
 
 /**
- * Why the control strip: a chat send leads with Ctrl+U to clear the agent's TUI
- * input line, and when the agent takes that write as a paste the byte becomes
- * part of the prompt — Claude Code records the row as `\u0015<body>`. U+0015 is
- * not whitespace, so trim() and /\s/ both leave it in place and a send can never
- * equal its own transcript row. It comes off before the marker strip because a
- * leading control byte also hides an `[Image #N]` from the start-of-text test.
+ * Why the terminal strip: a chat send reaches the agent over the PTY, so its
+ * transport bytes can end up in the prompt the agent records. Native chat leads a
+ * send with Ctrl+U to clear the input line and brackets an image path as a paste;
+ * when the agent takes the write literally, Claude Code records the row as
+ * `\u0015<body>` or `\u001b[200~<path>\u001b[201~`. None of that is whitespace, so
+ * trim() and /\s/ leave it in place and a send can never equal its own row.
+ *
+ * Escape sequences come off before lone control bytes — stripping ESC first would
+ * strand the printable `[200~` tail — and both come off before the marker strip,
+ * because a leading control byte hides an `[Image #N]` from the start-of-text test.
  */
 export function normalizeNativeChatUserText(text: string): string {
-  return stripImagePromptMarker(text.replace(TERMINAL_CONTROL_CHARACTER_PATTERN, ''))
+  return stripImagePromptMarker(
+    stripAnsiEscapeSequences(text).replace(TERMINAL_CONTROL_CHARACTER_PATTERN, '')
+  )
     .trim()
     .replace(/\s+/g, ' ')
 }
