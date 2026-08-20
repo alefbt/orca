@@ -209,10 +209,31 @@ export function reconcileClientOwnedTabPlacement(
     })
   }
 
-  const groups = reconciled.filter(
-    (group) =>
-      group.tabOrder.length > 0 || input.isGroupReserved(group.id) || layoutGroupIds.has(group.id)
+  // Why: a group emptied because its tabs vanished collapses exactly like a local
+  // last-tab close; only rendered-but-recordless repair groups and reserved
+  // pending-create groups may stay empty.
+  const emptiedGroupIds = new Set(
+    reconciled
+      .filter(
+        (group) =>
+          group.tabOrder.length === 0 &&
+          !input.isGroupReserved(group.id) &&
+          (working.get(group.id)?.group.tabOrder.length ?? 0) > 0
+      )
+      .map((group) => group.id)
   )
+  let groups = reconciled.filter(
+    (group) =>
+      group.tabOrder.length > 0 ||
+      input.isGroupReserved(group.id) ||
+      (layoutGroupIds.has(group.id) && !emptiedGroupIds.has(group.id))
+  )
+  if (groups.length === 0 && reconciled.length > 0) {
+    // Why: never drop to zero groups — closeUnifiedTab keeps the last pane too.
+    const fallback =
+      reconciled.find((group) => group.id === input.currentActiveGroupId) ?? reconciled[0]
+    groups = [fallback]
+  }
   const survivingGroupIds = new Set(groups.map((group) => group.id))
   const intentGroupId = input.intentTabId
     ? (groups.find((group) => group.tabOrder.includes(input.intentTabId as string))?.id ?? null)

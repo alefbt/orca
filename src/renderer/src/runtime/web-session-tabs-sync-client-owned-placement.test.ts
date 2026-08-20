@@ -13,6 +13,7 @@ import {
   resetWebSessionTerminalPlacementsForTests
 } from './web-session-terminal-placement'
 import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
+import { reconcileClientOwnedTabPlacement } from './web-session-client-owned-tab-placement'
 import {
   ENV,
   LEAF_ID,
@@ -457,6 +458,106 @@ describe('client-owned tab placement for paired worktrees', () => {
     const effectiveGroups = patch.groupsByWorktree?.[WT] ?? state.groupsByWorktree[WT]
     expect(effectiveGroups?.map((group) => group.id)).toEqual([HOST_GROUP, PREVIEW_GROUP])
     expect((patch.activeGroupIdByWorktree ?? state.activeGroupIdByWorktree)[WT]).toBe(PREVIEW_GROUP)
+  })
+
+  // Remote-owned browser closes round-trip through the host, so the snapshot — not
+  // closeUnifiedTab — must collapse the pane the vanished tab leaves behind.
+  it('collapses a split pane whose only tab vanished from the snapshot', () => {
+    const state = splitClientState()
+    const patch = applyWebSessionTabsSnapshot(
+      state,
+      makeSnapshot(
+        [
+          terminalSurface('host-tab-1', LEAF_ID, 'terminal-1', true),
+          terminalSurface('host-tab-2', SECOND_LEAF_ID, 'terminal-2')
+        ],
+        {
+          activeGroupId: HOST_GROUP,
+          activeTabId: `host-tab-1::${LEAF_ID}`,
+          tabGroups: [
+            {
+              id: HOST_GROUP,
+              activeTabId: 'host-tab-1',
+              tabOrder: ['host-tab-1', 'host-tab-2'],
+              recentTabIds: []
+            }
+          ],
+          tabGroupLayout: { type: 'leaf', groupId: HOST_GROUP }
+        }
+      ),
+      ENV,
+      NOW
+    ) as Partial<WebSessionTabsSyncState>
+
+    const effectiveGroups = patch.groupsByWorktree?.[WT] ?? state.groupsByWorktree[WT]
+    expect(effectiveGroups?.map((group) => group.id)).toEqual([HOST_GROUP])
+    const effectiveLayout = (patch.layoutByWorktree ?? state.layoutByWorktree)[WT]
+    expect(effectiveLayout && layoutLeafGroupIds(effectiveLayout)).toEqual([HOST_GROUP])
+    expect((patch.activeGroupIdByWorktree ?? state.activeGroupIdByWorktree)[WT]).toBe(HOST_GROUP)
+  })
+
+  it('keeps an emptied pane reserved by a pending create in flight', () => {
+    recordWebSessionBrowserPlacement({
+      environmentId: ENV,
+      worktreeId: WT,
+      remotePageId: 'pending-replacement-page',
+      groupId: PREVIEW_GROUP
+    })
+    const state = splitClientState()
+    const patch = applyWebSessionTabsSnapshot(
+      state,
+      makeSnapshot(
+        [
+          terminalSurface('host-tab-1', LEAF_ID, 'terminal-1', true),
+          terminalSurface('host-tab-2', SECOND_LEAF_ID, 'terminal-2')
+        ],
+        {
+          activeGroupId: HOST_GROUP,
+          activeTabId: `host-tab-1::${LEAF_ID}`,
+          tabGroups: [
+            {
+              id: HOST_GROUP,
+              activeTabId: 'host-tab-1',
+              tabOrder: ['host-tab-1', 'host-tab-2'],
+              recentTabIds: []
+            }
+          ],
+          tabGroupLayout: { type: 'leaf', groupId: HOST_GROUP }
+        }
+      ),
+      ENV,
+      NOW
+    ) as Partial<WebSessionTabsSyncState>
+
+    const effectiveGroups = patch.groupsByWorktree?.[WT] ?? state.groupsByWorktree[WT]
+    expect(effectiveGroups?.map((group) => group.id)).toEqual([HOST_GROUP, PREVIEW_GROUP])
+  })
+
+  // Unreachable through applyWebSessionTabsSnapshot (a no-tab snapshot bails before
+  // placement), so pin the defensive branch at the unit level.
+  it('keeps the last pane when every group empties at once', () => {
+    const result = reconcileClientOwnedTabPlacement({
+      currentGroups: [
+        { id: HOST_GROUP, worktreeId: WT, activeTabId: T1, tabOrder: [T1] },
+        {
+          id: PREVIEW_GROUP,
+          worktreeId: WT,
+          activeTabId: BROWSER_HOST_TAB,
+          tabOrder: [BROWSER_HOST_TAB]
+        }
+      ],
+      worktreeId: WT,
+      validUnifiedTabIds: new Set(),
+      adoptedTabs: [],
+      placementMoves: [],
+      rekeyedTabIds: new Map(),
+      intentTabId: null,
+      currentActiveGroupId: PREVIEW_GROUP,
+      currentLayout: SPLIT_LAYOUT,
+      isGroupReserved: () => false
+    })
+    expect(result.groups?.map((group) => group.id)).toEqual([PREVIEW_GROUP])
+    expect(result.layout && layoutLeafGroupIds(result.layout)).toEqual([PREVIEW_GROUP])
   })
 
   // The host drops client-minted group ids, so the client's own record must land the terminal.
