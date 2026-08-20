@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { deriveBrowserRoutePartition } from './browser-route-identity'
 import { BrowserRoutePartitionBindingStore } from './browser-route-partition-binding-store'
+import { resolveBrowserRoutePartitionBinding } from './browser-route-partition-migration'
 import {
   BrowserRouteSessionRegistry,
   type BrowserRouteElectronSession
@@ -135,6 +136,34 @@ describe('route partition identity migration', () => {
     expect(first).toBe(deriveBrowserRoutePartition(identity).partition)
     expect(second).toBe(first)
     expect(bindings(filePath).size).toBe(1)
+  })
+
+  // Why: the derived name is already taken, so walking off to the pre-migration partition
+  // would abandon a jar this identity holds and leave it behind as an orphan.
+  it('never leaves a partition name this identity already holds', () => {
+    const legacyIdentity = legacyIdentityFor('runtime-before-upgrade')
+    const derived = deriveBrowserRoutePartition(identity)
+    const legacy = deriveBrowserRoutePartition(legacyIdentity)
+    const rebound: string[] = []
+
+    const resolved = resolveBrowserRoutePartitionBinding({
+      bindings: {
+        get: (partition) =>
+          partition === derived.partition
+            ? 'f'.repeat(64)
+            : partition === legacy.partition
+              ? legacy.bindingFingerprint
+              : null,
+        findPartitionByFingerprint: () => null,
+        rebind: (partition) => rebound.push(partition)
+      },
+      identity,
+      legacyIdentity,
+      storageScope
+    })
+
+    expect(resolved).toEqual(derived)
+    expect(rebound).toEqual([])
   })
 
   it('never adopts a partition another route already owns', async () => {

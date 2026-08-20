@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { browserNetworkExecutionHostStorageIdentity } from './browser-execution-host-storage-identity'
+import {
+  browserAuthorityExecutionHostStorageIdentity,
+  browserNetworkExecutionHostStorageIdentity,
+  legacyBrowserNativeExecutionHostStorageIdentity,
+  legacyBrowserNetworkExecutionHostStorageIdentity
+} from './browser-execution-host-storage-identity'
 import { browserNetworkExecutionHostKey } from './browser-network-execution-route'
 
 const storageKey = 'a'.repeat(64)
@@ -116,6 +121,92 @@ describe('browserNetworkExecutionHostStorageIdentity', () => {
         'a","b'
       )
     )
+  })
+
+  // Why: these strings are hashed into persisted partition names, and the pre-migration forms
+  // name the jar adoption must find -- changing either relocates or strands the user's cookies.
+  it('pins the storage identity of every host kind, current and pre-migration', () => {
+    const tag = '"orca-browser-execution-host-storage",1'
+
+    expect(
+      browserNetworkExecutionHostStorageIdentity(
+        { kind: 'native', runtimeId: 'r', revision: 1 },
+        storageKey
+      )
+    ).toBe(`[${tag},"authority","${storageKey}"]`)
+    expect(browserAuthorityExecutionHostStorageIdentity(storageKey)).toBe(
+      `[${tag},"authority","${storageKey}"]`
+    )
+    expect(
+      browserNetworkExecutionHostStorageIdentity(
+        { kind: 'wsl', runtimeId: 'r', revision: 1, distro: 'Ubuntu' },
+        storageKey
+      )
+    ).toBe(`[${tag},"authority-wsl","${storageKey}","Ubuntu"]`)
+    expect(
+      browserNetworkExecutionHostStorageIdentity(
+        { kind: 'ssh', targetId: 'ssh-1', providerEpoch: 'e', connectionGeneration: 1 },
+        storageKey
+      )
+    ).toBe(`[${tag},"ssh","ssh-1"]`)
+
+    expect(legacyBrowserNativeExecutionHostStorageIdentity('r')).toBe(`[${tag},"native","r"]`)
+    expect(
+      legacyBrowserNetworkExecutionHostStorageIdentity({
+        kind: 'native',
+        runtimeId: 'r',
+        revision: 1
+      })
+    ).toBe(`[${tag},"native","r"]`)
+    expect(
+      legacyBrowserNetworkExecutionHostStorageIdentity({
+        kind: 'wsl',
+        runtimeId: 'r',
+        revision: 1,
+        distro: 'Ubuntu'
+      })
+    ).toBe(`[${tag},"wsl","r","Ubuntu"]`)
+    expect(
+      legacyBrowserNetworkExecutionHostStorageIdentity({
+        kind: 'ssh',
+        targetId: 'ssh-1',
+        providerEpoch: 'e',
+        connectionGeneration: 1
+      })
+    ).toBe(`[${tag},"ssh","ssh-1"]`)
+  })
+
+  // Why: adoption trusts the pre-migration name, so distros sharing one would hand a
+  // second distro the first one's logged-in jar.
+  it('keeps pre-migration WSL distros apart on one runtime', () => {
+    expect(
+      legacyBrowserNetworkExecutionHostStorageIdentity({
+        kind: 'wsl',
+        runtimeId: 'r',
+        revision: 1,
+        distro: 'Ubuntu'
+      })
+    ).not.toBe(
+      legacyBrowserNetworkExecutionHostStorageIdentity({
+        kind: 'wsl',
+        runtimeId: 'r',
+        revision: 1,
+        distro: 'Debian'
+      })
+    )
+  })
+
+  // Why: the kind tag is the only thing keeping an SSH record out of the paired server's
+  // own jar when the two records happen to carry the same key.
+  it('never lets an SSH target share the paired server machine identity', () => {
+    const shared = 'ssh-1700000000-aaa111'
+
+    expect(
+      browserNetworkExecutionHostStorageIdentity(
+        { kind: 'ssh', targetId: shared, providerEpoch: 'e', connectionGeneration: 1 },
+        shared
+      )
+    ).not.toBe(browserAuthorityExecutionHostStorageIdentity(shared))
   })
 
   it('is never mistaken for a route fencing key', () => {
