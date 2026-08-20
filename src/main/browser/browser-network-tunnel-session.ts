@@ -1,10 +1,10 @@
 import {
   BrowserNetworkTunnelOpcode,
   decodeBrowserNetworkTunnelFrame,
-  decodeBrowserNetworkTunnelOpen,
   encodeBrowserNetworkTunnelWindowUpdate,
   type BrowserNetworkTunnelFrame
 } from '../../shared/browser-network-tunnel-protocol'
+import { admitBrowserNetworkTunnelOpen } from './browser-network-tunnel-open-admission'
 import {
   flushBrowserNetworkDestination,
   grantBrowserNetworkDestinationCredit,
@@ -17,18 +17,11 @@ import { handleBrowserNetworkTunnelHeartbeat } from './browser-network-tunnel-he
 import { createBrowserNetworkTunnelResourceBudget } from './browser-network-tunnel-resource-budget'
 import {
   BROWSER_NETWORK_TUNNEL_INITIAL_WINDOW_BYTES,
-  reserveBrowserNetworkTunnelStreamId,
   validateBrowserNetworkTunnelGeneration,
   type BrowserNetworkTunnelSessionOptions,
-  type BrowserNetworkTunnelSocket,
   type BrowserNetworkTunnelStream
 } from './browser-network-tunnel-stream-state'
-import {
-  createBrowserNetworkTunnelStream,
-  retireBrowserNetworkTunnelStream
-} from './browser-network-tunnel-stream-lifecycle'
-
-const BROWSER_NETWORK_TUNNEL_MAX_STREAMS = 128
+import { retireBrowserNetworkTunnelStream } from './browser-network-tunnel-stream-lifecycle'
 
 export class BrowserNetworkTunnelSession {
   private readonly tunnelGeneration: number
@@ -117,45 +110,20 @@ export class BrowserNetworkTunnelSession {
   }
 
   private openStream(frame: BrowserNetworkTunnelFrame): void {
-    const identityError = reserveBrowserNetworkTunnelStreamId(this.openedStreamIds, frame.streamId)
-    if (identityError) {
-      this.frameSender.sendError(frame.streamId, identityError)
-      this.close()
-      return
-    }
-    if (!this.resourceBudget.admitOpenAttempt()) {
-      this.frameSender.sendError(frame.streamId, 'open_rate_exceeded')
-      return
-    }
-    if (this.streams.size >= BROWSER_NETWORK_TUNNEL_MAX_STREAMS) {
-      this.frameSender.sendError(frame.streamId, 'stream_limit_exceeded')
-      return
-    }
-    const target = decodeBrowserNetworkTunnelOpen(frame.payload)
-    if (!target) {
-      this.frameSender.sendError(frame.streamId, 'invalid_open_target')
-      return
-    }
-    const releasePendingOpen = this.resourceBudget.claimPendingOpen()
-    if (!releasePendingOpen) {
-      this.frameSender.sendError(frame.streamId, 'pending_open_limit_exceeded')
-      return
-    }
-    let socket: BrowserNetworkTunnelSocket
-    try {
-      socket = this.connect(target)
-    } catch {
-      releasePendingOpen()
-      this.frameSender.sendError(frame.streamId, 'destination_connect_failed')
-      return
-    }
-    const stream = createBrowserNetworkTunnelStream({
-      id: frame.streamId,
-      socket,
-      releasePendingOpen,
+    const stream = admitBrowserNetworkTunnelOpen(frame, {
+      openedStreamIds: this.openedStreamIds,
+      streamCount: this.streams.size,
+      resourceBudget: this.resourceBudget,
+      connect: this.connect,
+      sendError: (streamId, code) => this.frameSender.sendError(streamId, code),
+      closeSession: () => this.close(),
       onConnectTimeout: (pendingStream) =>
         this.failStream(pendingStream, 'destination_connect_timeout')
     })
+    if (!stream) {
+      return
+    }
+    const socket = stream.socket
     this.streams.set(stream.id, stream)
     socket.setNoDelay(true)
     socket.pause()
@@ -252,6 +220,10 @@ export class BrowserNetworkTunnelSession {
     if (!this.isCurrent(stream)) {
       return
     }
+    if (!stream.connected) {
+      this.failStream(stream, 'destination_closed_before_connect')
+      return
+    }
     if (stream.destinationEnded) {
       this.failStream(stream, 'duplicate_destination_half_close')
       return
@@ -264,6 +236,12 @@ export class BrowserNetworkTunnelSession {
 
   private onDestinationClose(stream: BrowserNetworkTunnelStream): void {
     if (!this.isCurrent(stream)) {
+      return
+    }
+    // The client has never seen Opened for this stream, so HalfClose/Close would read as a
+    // protocol violation and fence the whole tunnel; fail just this stream instead.
+    if (!stream.connected) {
+      this.failStream(stream, 'destination_closed_before_connect')
       return
     }
     stream.destinationClosed = true
