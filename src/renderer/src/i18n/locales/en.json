@@ -140,7 +140,9 @@
         "optionDeviceTooltip": "Pages browse from this machine's network.",
         "rowTitle": "SSH workspaces",
         "rowDescription": "Where browser traffic leaves from. Pages always render on this device.",
-        "useHost": "Use SSH host"
+        "useHost": "Use SSH host",
+        "probeSkippedHosts": "Hosts routed without the connection check (Try anyway):",
+        "probeAgain": "Check again"
       },
       "remoteBrowsing": {
         "heading": "Remote browsing",

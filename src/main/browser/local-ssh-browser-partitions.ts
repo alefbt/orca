@@ -76,7 +76,15 @@ export async function prepareLocalSshBrowserPartition(input: {
   /** Set by the error card's "Try anyway": mounts despite a failed forwarding probe. */
   skipProbe?: boolean
 }): Promise<{ partition: string }> {
-  const identityKey = JSON.stringify([input.targetId, input.browserProfileId])
+  // Why: the probe intent is part of the key — otherwise a "Try anyway" success
+  // would satisfy every later probed prepare from cache, and clearing the
+  // persisted skip in settings could never resurface the classified card
+  // without an app restart.
+  const identityKey = JSON.stringify([
+    input.targetId,
+    input.browserProfileId,
+    input.skipProbe === true
+  ])
   let pending = preparedByIdentityKey.get(identityKey)
   if (!pending) {
     pending = prepareFresh(input)
