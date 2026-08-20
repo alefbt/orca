@@ -98,28 +98,16 @@ describe('appendMobileNativeChatPending ordinals for repeated sends', () => {
   })
 })
 
-describe('appendMobileNativeChatPending for sends the transcript cannot echo', () => {
+describe('mobile pending echoes whose text normalizes to nothing', () => {
   const KEY = 'host\0worktree\0tab\0session'
 
-  // The row this send produces normalizes to null, so neither the count pass nor
-  // the glue matcher can ever see it. An echo would pin at the tail forever.
-  it('records no echo for a prompt made only of image markers', () => {
-    const messages = [userTurn('m1', 'hi')]
-    const pending = appendMobileNativeChatPending(
-      {},
-      KEY,
-      'p1',
-      sendOrigin('[Image #1]', messages),
-      '[Image #1]'
-    )
-
-    expect(pending[KEY]).toBeUndefined()
-  })
-
-  // The motivation for suppressing it at the source: had the echo been recorded,
-  // no later transcript could retire it. Built by hand, because append no longer
-  // produces one.
-  it('could never have retired such an echo once recorded', () => {
+  // KNOWN GAP, pre-existing and not fixed here: a prompt made only of
+  // `[Image #N]` markers normalizes to '' on BOTH sides, so its transcript row is
+  // invisible to the count pass and skipped by the glue matcher, and the echo
+  // pins at the tail. Suppressing the echo instead is NOT the fix - the row also
+  // renders as `blocks: []`, so the send would vanish entirely, which fails
+  // harder than a stuck bubble. The real fix is to stop the row rendering empty.
+  it('cannot retire an echo whose row normalizes away', () => {
     const stranded = [
       {
         id: 'p1',
@@ -150,7 +138,7 @@ describe('appendMobileNativeChatPending for sends the transcript cannot echo', (
     expect(both[KEY]?.map((item) => item.expectedOccurrence)).toEqual([1, 2])
   })
 
-  it('still records an image echo, whose text is empty by design', () => {
+  it('records an image echo, whose text is empty by design', () => {
     const pending = appendMobileNativeChatPending({}, KEY, 'p1', sendOrigin('', []), '', [
       'file:///photo.jpg'
     ])

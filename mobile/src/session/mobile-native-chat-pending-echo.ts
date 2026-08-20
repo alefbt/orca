@@ -44,15 +44,6 @@ export function appendMobileNativeChatPending(
   text: string,
   images?: string[]
 ): PendingByKey {
-  // A send that normalizes to nothing and carries no image can never be matched:
-  // its own transcript row normalizes to null too, so it is invisible to both the
-  // count pass and the glue matcher. Echoing it pins a bubble at the tail for the
-  // life of the session — the same rule slash commands already get, for the same
-  // reason. Reachable from a prompt made only of `[Image #N]` markers, whitespace,
-  // or control bytes.
-  if (origin.normalizedText === '' && !images?.length) {
-    return previous
-  }
   const current = previous[key] ?? []
   // Both sides must be normalized the same way: `origin.normalizedText` has its
   // whitespace collapsed, so comparing a raw trim() never matches a multi-line
