@@ -9,6 +9,7 @@ import {
   type BrowserClientPageRendererIdentity
 } from './browser-client-page-cleanup'
 import { createReservedBrowserClientPage } from './browser-client-page-creation'
+import { retireSupersededExecutionHostPages } from './browser-client-page-execution-host-supersession'
 import {
   browserClientPageCommandFailureCode,
   BrowserClientPageCommandError,
@@ -230,7 +231,11 @@ export class BrowserClientPageCommandExecutor {
     await createReservedBrowserClientPage(
       {
         ...this.dependencies,
-        authorityConnectionIdentity: this.authorityConnectionIdentity
+        authorityConnectionIdentity: this.authorityConnectionIdentity,
+        retireSupersededExecutionHostPages: (route) =>
+          retireSupersededExecutionHostPages(this.pages.values(), route, (id, generation) =>
+            this.retirePage(id, generation)
+          )
       },
       event,
       signal,
