@@ -43,6 +43,17 @@ const authority = (
   pageHostGeneration: placement.pageHostGeneration
 })
 
+const tunnelIdentity = (
+  lease: ReturnType<typeof attachHost>['lease'],
+  executionHostKey = 'native:runtime-a:1'
+) => ({
+  authorityEpoch: lease.authorityEpoch,
+  browserHostClientId: lease.browserHostClientId,
+  browserHostGeneration: lease.browserHostGeneration,
+  pairedDeviceId: lease.pairedDeviceId,
+  executionHostKey
+})
+
 afterEach(() => {
   vi.useRealTimers()
 })
@@ -166,5 +177,63 @@ describe('browser host lease placement retirement', () => {
 
     expect(leases.getPlacement('page-1')).toBeUndefined()
     expect(leases.placeServerPage('page-after-fence')).toEqual({ kind: 'server' })
+  })
+
+  it('keeps the replacement lease registered when a stale handle releases', () => {
+    const leases = registry()
+    const first = attachHost(leases, 'host-a')
+    const replacement = attachHost(leases, 'host-a', { connectionId: 'connection-b' })
+
+    // Why: releasing a superseded handle must never unregister the lease that replaced it.
+    first.release()
+
+    expect(leases.select('host-a')).toBe(replacement.lease)
+    expect(leases.placeClientPage('page-a', 'host-a')).toMatchObject({
+      kind: 'client',
+      browserHostGeneration: replacement.lease.browserHostGeneration
+    })
+  })
+
+  it('fences a replaced lease routes as replaced rather than released', async () => {
+    const leases = registry()
+    const first = attachHost(leases, 'host-a')
+    const route = leases.openTunnel(tunnelIdentity(first.lease))
+
+    attachHost(leases, 'host-a', { connectionId: 'connection-b' })
+
+    await expect(route.whenFenced).resolves.toBe('lease_replaced')
+    await expect(first.whenFenced).resolves.toBe('replaced')
+  })
+
+  it('revokes linked execution host grants when the lease is fenced', () => {
+    const leases = registry()
+    const host = attachHost(leases, 'host-a')
+    const identity = tunnelIdentity(host.lease)
+    leases.grantExecutionHost(identity, identity.executionHostKey)
+    const onRevoked = vi.fn()
+    leases.linkExecutionHostGrant(identity, identity.executionHostKey, onRevoked)
+
+    host.release()
+
+    expect(onRevoked).toHaveBeenCalledOnce()
+  })
+
+  it('does not unregister the replacement tunnel when a stale handle releases', async () => {
+    const leases = registry()
+    const host = attachHost(leases, 'host-a')
+    const identity = tunnelIdentity(host.lease)
+    const first = leases.openTunnel(identity)
+    const replacement = leases.openTunnel(identity)
+    let replacementReason: string | undefined
+    void replacement.whenFenced.then((reason) => {
+      replacementReason = reason
+    })
+
+    first.release()
+    leases.openTunnel(identity)
+    await Promise.resolve()
+
+    await expect(first.whenFenced).resolves.toBe('replaced')
+    expect(replacementReason).toBe('replaced')
   })
 })

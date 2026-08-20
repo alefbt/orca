@@ -84,6 +84,39 @@ describe('fenced client page release', () => {
     expect(getRuntimeBrowserPageRegistry(runtime).getPage('page-a')).toBeDefined()
     expect(runtime.retireRuntimeOwnedBrowserSessionTab).not.toHaveBeenCalled()
   })
+
+  it('releases the remaining fenced pages when one page release throws', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const runtime = createRuntime()
+    const leases = getBrowserHostLeaseRegistry(runtime)
+    const host = attachHost(runtime, 'host-a')
+    publishPage(runtime, 'page-a', placeClientPage(runtime, 'page-a', 'host-a'))
+    publishPage(runtime, 'page-b', placeClientPage(runtime, 'page-b', 'host-a'))
+    runtime.retireRuntimeOwnedBrowserSessionTab.mockImplementationOnce(() => {
+      throw new Error('session tab retirement failed')
+    })
+
+    // A lease past the point of return must not strand pages behind one failing release.
+    expect(() => host.release()).not.toThrow()
+
+    expect(runtime.retireRuntimeOwnedBrowserSessionTab).toHaveBeenCalledTimes(2)
+    expect(getRuntimeBrowserPageRegistry(runtime).listPages()).toEqual([])
+    expect(leases.getPlacement('page-b')).toBeUndefined()
+  })
+
+  it('disarms the reconnect grace timer when the lease is released outright', async () => {
+    vi.useFakeTimers()
+    const runtime = createRuntime()
+    const host = attachHost(runtime, 'host-a', { reconnect: true })
+    publishPage(runtime, 'page-a', placeClientPage(runtime, 'page-a', 'host-a'))
+
+    host.disconnect()
+    expect(vi.getTimerCount()).toBe(1)
+    host.release()
+
+    expect(vi.getTimerCount()).toBe(0)
+    await expect(host.whenFenced).resolves.toBe('released')
+  })
 })
 
 function createRuntime() {

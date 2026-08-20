@@ -306,6 +306,24 @@ describe('browser host page reconciliation orchestration', () => {
     ).rejects.toThrow('browser_host_page_reconciliation_inventory_consumed')
   })
 
+  it('aborts an in-flight reconciliation when its lease is released', async () => {
+    const { leases, identity, events, host } = setup([oldPage('page-a')])
+    leases.grantExecutionHost(identity, 'native:runtime-new:1')
+    const reconciling = leases.reconcileClientPages(identity, [reclaimIntent('page-a', 8)])
+    await vi.waitFor(() => expect(events).toHaveLength(1))
+
+    host.release()
+
+    // Why: a fenced lease must abort its attempt, not wait out a client that can never answer.
+    await expect(reconciling).rejects.toMatchObject({
+      message: 'Browser host page reconciliation reclaim/close phase failed',
+      errors: expect.arrayContaining([
+        expect.objectContaining({ message: 'browser_host_page_reconciliation_aborted' })
+      ])
+    })
+    expect(events).toHaveLength(1)
+  })
+
   it('is single-flight and emits nothing for a legacy lease', async () => {
     const negotiated = setup([oldPage('page-a')])
     negotiated.leases.grantExecutionHost(negotiated.identity, 'native:runtime-new:1')
