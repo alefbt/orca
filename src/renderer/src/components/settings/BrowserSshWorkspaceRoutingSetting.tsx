@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID } from '@/lib/settings-navigation-types'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { SearchableSetting } from './SearchableSetting'
-import { SettingsSwitchRow } from './SettingsFormControls'
+import { SettingsRow, SettingsSegmentedControl } from './SettingsFormControls'
 import {
   getBrowserSshWorkspaceRoutingDescription,
   getBrowserSshWorkspaceRoutingTitle
@@ -32,17 +32,53 @@ export function BrowserSshWorkspaceRoutingSetting({
       id={BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID}
       title={title}
       description={description}
-      keywords={['browser', 'ssh', 'remote', 'proxy', 'tunnel', 'routing', 'host', 'network']}
+      keywords={[
+        'browser',
+        'ssh',
+        'remote',
+        'proxy',
+        'tunnel',
+        'routing',
+        'host',
+        'network',
+        'egress',
+        'traffic'
+      ]}
     >
-      <SettingsSwitchRow
+      <SettingsRow
         label={title}
         description={description}
-        // Why: absent means on — routed egress is the correct default for SSH workspaces.
-        checked={settings.browserSshWorkspaceRoutingEnabled !== false}
-        onChange={() =>
-          updateSettings({
-            browserSshWorkspaceRoutingEnabled: settings.browserSshWorkspaceRoutingEnabled === false
-          })
+        control={
+          <SettingsSegmentedControl
+            size="sm"
+            ariaLabel={title}
+            // Why: absent means on — routed egress is the correct default for SSH workspaces.
+            value={settings.browserSshWorkspaceRoutingEnabled !== false ? 'host' : 'device'}
+            onChange={(value) =>
+              updateSettings({ browserSshWorkspaceRoutingEnabled: value === 'host' })
+            }
+            options={[
+              {
+                value: 'host',
+                label: translate('settings.browser.sshWorkspaceRouting.optionHost', 'SSH host'),
+                tooltip: translate(
+                  'settings.browser.sshWorkspaceRouting.optionHostTooltip',
+                  "Traffic and DNS go through the workspace's SSH host."
+                )
+              },
+              {
+                value: 'device',
+                label: translate(
+                  'settings.browser.sshWorkspaceRouting.optionDevice',
+                  'This device'
+                ),
+                tooltip: translate(
+                  'settings.browser.sshWorkspaceRouting.optionDeviceTooltip',
+                  "Pages browse from this machine's network."
+                )
+              }
+            ]}
+          />
         }
       />
       {disabledTargetIds.length > 0 ? (

@@ -121,13 +121,29 @@
     "browser": {
       "clientHostedRemote": {
         "title": "Host remote browser pages on this device",
-        "description": "Render remote workspace pages on this desktop; network traffic still goes through the remote host. Applies to new pages only."
+        "description": "Render remote workspace pages on this desktop; network traffic still goes through the remote host. Applies to new pages only.",
+        "optionDevice": "This device",
+        "optionDeviceTooltip": "Pages render on this desktop, so input and popups behave natively.",
+        "optionServer": "Server (streamed)",
+        "optionServerTooltip": "Pages render on the remote server and stream to this device.",
+        "rowTitle": "Remote server workspaces",
+        "rowDescription": "Where pages render. Traffic always goes through the remote server. Applies to new pages only."
       },
       "sshWorkspaceRouting": {
         "title": "Browse through SSH workspace hosts",
         "description": "Browser pages in SSH workspaces send their traffic through the workspace's SSH host, with DNS resolved there. Off means pages browse from this machine.",
         "disabledHosts": "Hosts browsing from this device instead:",
-        "enableHost": "Route again"
+        "enableHost": "Route again",
+        "optionHost": "SSH host",
+        "optionHostTooltip": "Traffic and DNS go through the workspace's SSH host.",
+        "optionDevice": "This device",
+        "optionDeviceTooltip": "Pages browse from this machine's network.",
+        "rowTitle": "SSH workspaces",
+        "rowDescription": "Where browser traffic leaves from. Pages always render on this device."
+      },
+      "remoteBrowsing": {
+        "heading": "Remote browsing",
+        "headingDescription": "Where remote workspace pages render, and where their network traffic leaves from."
       }
     }
   },

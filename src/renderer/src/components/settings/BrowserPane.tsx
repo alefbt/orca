@@ -16,6 +16,7 @@ import { BrowserTerminalLinkActionsSetting } from './BrowserTerminalLinkActionsS
 import { BrowserLocalhostWorktreeLabelsSetting } from './BrowserLocalhostWorktreeLabelsSetting'
 import { BrowserClientHostedRemoteSetting } from './BrowserClientHostedRemoteSetting'
 import { BrowserSshWorkspaceRoutingSetting } from './BrowserSshWorkspaceRoutingSetting'
+import { SettingsSubsectionHeader } from './SettingsFormControls'
 import { BrowserSessionCookiesSection } from './BrowserSessionCookiesSection'
 import { BrowserNewProfileDialog } from './BrowserNewProfileDialog'
 import {
@@ -278,6 +279,17 @@ export function BrowserPane({
         <BrowserLocalhostWorktreeLabelsSetting
           settings={settings}
           updateSettings={updateSettings}
+        />
+      ) : null}
+
+      {showClientHostedRemote || showSshWorkspaceRouting ? (
+        <SettingsSubsectionHeader
+          className="pt-2"
+          title={translate('settings.browser.remoteBrowsing.heading', 'Remote browsing')}
+          description={translate(
+            'settings.browser.remoteBrowsing.headingDescription',
+            'Where remote workspace pages render, and where their network traffic leaves from.'
+          )}
         />
       ) : null}
 
