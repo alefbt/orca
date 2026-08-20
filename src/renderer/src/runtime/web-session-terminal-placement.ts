@@ -9,6 +9,12 @@
 const groupByPendingHostTabId = new Map<string, string>()
 const MAX_PENDING_TERMINAL_PLACEMENTS = 128
 
+/** Create RPCs may return a surface id (`parent::leaf`); snapshots key terminals by the parent. */
+export function webTerminalPlacementParentTabId(hostTabId: string): string {
+  const separator = hostTabId.indexOf('::')
+  return separator === -1 ? hostTabId : hostTabId.slice(0, separator)
+}
+
 function hostTabKey(environmentId: string, worktreeId: string, hostTabId: string): string {
   return `${environmentId}\0${worktreeId}\0${hostTabId}`
 }

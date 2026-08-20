@@ -82,7 +82,8 @@ import { parsePaneKey } from '../../../shared/stable-pane-id'
 import { toRuntimeExecutionHostId } from '../../../shared/execution-host'
 import {
   forgetWebSessionTerminalPlacement,
-  recordWebSessionTerminalPlacement
+  recordWebSessionTerminalPlacement,
+  webTerminalPlacementParentTabId
 } from './web-session-terminal-placement'
 import {
   claimWebSessionBrowserPlacementGroupCleanup,
@@ -447,7 +448,7 @@ async function createWebRuntimeSessionTerminalResult(
       recordWebSessionTerminalPlacement({
         environmentId,
         worktreeId: args.worktreeId,
-        hostTabId: createdTabId,
+        hostTabId: webTerminalPlacementParentTabId(createdTabId),
         groupId: args.targetGroupId
       })
     }
@@ -460,10 +461,17 @@ async function createWebRuntimeSessionTerminalResult(
       expectedEnvironmentPairingRevision: intentOwner.pairingRevision,
       // Why: the publication can beat the RPC response; replay it once after caller intent exists.
       acceptCurrentSnapshot:
-        Boolean(createdTabId) && (args.activate !== false || Boolean(args.targetGroupId))
+        Boolean(createdTabId) && (args.activate !== false || Boolean(args.targetGroupId)),
+      // Why: a placement record needs a post-create list; a deduped in-flight one can predate it.
+      ...(args.targetGroupId && createdTabId ? { afterCurrentInFlight: true } : {})
     })
     if (args.targetGroupId && createdTabId) {
-      await settleWebRuntimeTerminalPlacement(environmentId, args.worktreeId, createdTabId)
+      await settleWebRuntimeTerminalPlacement(
+        environmentId,
+        args.worktreeId,
+        webTerminalPlacementParentTabId(createdTabId),
+        { groupId: args.targetGroupId, activate: args.activate !== false }
+      )
     }
     return {
       outcome: { status: 'created' },
@@ -482,7 +490,7 @@ async function createWebRuntimeSessionTerminalResult(
       forgetWebSessionTerminalPlacement({
         environmentId,
         worktreeId: args.worktreeId,
-        hostTabId: createdTabId
+        hostTabId: webTerminalPlacementParentTabId(createdTabId)
       })
     }
     // Why: once the host accepted creation, reporting failure invites the user
@@ -494,21 +502,35 @@ async function createWebRuntimeSessionTerminalResult(
   }
 }
 
-/** Consume the placement record once the mirrored tab exists (bounded poll, then forget). */
+/** Settle the placement once the mirrored tab exists (bounded poll), then consume the record. */
 async function settleWebRuntimeTerminalPlacement(
   environmentId: string,
   worktreeId: string,
-  hostTabId: string
+  hostTabId: string,
+  placement: { groupId: string; activate: boolean }
 ): Promise<void> {
   const unifiedTabId = toWebTerminalSurfaceTabId(hostTabId)
-  const materialized = (): boolean =>
-    (useAppStore.getState().unifiedTabsByWorktree[worktreeId] ?? []).some(
+  const findTab = () =>
+    (useAppStore.getState().unifiedTabsByWorktree[worktreeId] ?? []).find(
       (tab) => tab.id === unifiedTabId
     )
   try {
     const deadline = Date.now() + 10_000
-    while (!materialized() && Date.now() < deadline) {
+    while (!findTab() && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    const tab = findTab()
+    const state = useAppStore.getState()
+    const targetGroupExists = (state.groupsByWorktree[worktreeId] ?? []).some(
+      (group) => group.id === placement.groupId
+    )
+    if (tab && targetGroupExists && tab.groupId !== placement.groupId) {
+      // Why: a snapshot can adopt the tab before the record exists (the publication races the
+      // RPC response); repair through the same client-owned move a user drag takes.
+      state.moveUnifiedTabToGroup(unifiedTabId, placement.groupId, {
+        activate: placement.activate,
+        recordInteraction: false
+      })
     }
   } finally {
     forgetWebSessionTerminalPlacement({ environmentId, worktreeId, hostTabId })

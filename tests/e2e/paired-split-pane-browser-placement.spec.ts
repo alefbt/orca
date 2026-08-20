@@ -366,65 +366,61 @@ test('creates paired split-pane tabs in the focused pane without disturbing the 
   }
 })
 
-// Why: known gap — paired terminal creates record no client placement (only browsers pass
-// clientTargetGroupId), so targetGroupId reaches only the host, which does not know a
-// client-minted split group. The tab is adopted into the mirrored root group and the focus
-// intent drags the active group with it. Flip this to a plain test once terminals record a
-// client placement like `openNewBrowserTabInActiveWorkspace` does.
-test.fail(
-  'places a paired split-pane terminal in the pane that asked for it',
-  async ({ testRepoPath }, testInfo) => {
-    test.setTimeout(300_000)
-    const fixture = await setUpPairedFixture(testInfo, testRepoPath)
-    try {
-      const { client, rootGroupId, worktreeId } = fixture
-      const rightGroupId = await client.page.evaluate(
-        ({ sourceGroupId, worktreeId }) => {
-          const state = window.__store?.getState()
-          const groupId = state?.createEmptySplitGroup(worktreeId, sourceGroupId, 'right')
-          if (!groupId) {
-            throw new Error('Right split group unavailable')
-          }
-          state?.focusGroup(worktreeId, groupId)
-          return groupId
-        },
-        { sourceGroupId: rootGroupId, worktreeId }
-      )
-      await openRemoteBrowserTab(client.page, fixture.url, rightGroupId)
-      await waitForGroupTabCount(
-        client.page,
-        worktreeId,
-        rightGroupId,
-        1,
-        'paired client never materialized the remote browser tab in the right pane'
-      )
+// Why: terminals record a client placement derived from targetGroupId (the host does not
+// know client-minted split groups), so the mirrored tab must land in the requesting pane.
+test('places a paired split-pane terminal in the pane that asked for it', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+    const rightGroupId = await client.page.evaluate(
+      ({ sourceGroupId, worktreeId }) => {
+        const state = window.__store?.getState()
+        const groupId = state?.createEmptySplitGroup(worktreeId, sourceGroupId, 'right')
+        if (!groupId) {
+          throw new Error('Right split group unavailable')
+        }
+        state?.focusGroup(worktreeId, groupId)
+        return groupId
+      },
+      { sourceGroupId: rootGroupId, worktreeId }
+    )
+    await openRemoteBrowserTab(client.page, fixture.url, rightGroupId)
+    await waitForGroupTabCount(
+      client.page,
+      worktreeId,
+      rightGroupId,
+      1,
+      'paired client never materialized the remote browser tab in the right pane'
+    )
 
-      const terminalsBefore = new Set(
-        (await readPanes(client.page, worktreeId)).tabs
-          .filter((tab) => tab.contentType === 'terminal')
-          .map((tab) => tab.id)
-      )
-      // Why: this is what the tab strip's "+" → Terminal item calls for that panel's group.
-      await client.page.evaluate(async (groupId) => {
-        await window.__store?.getState().openNewTerminalTabInActiveWorkspace(groupId)
-      }, rightGroupId)
-      const findCreatedTerminal = async () =>
-        (await readPanes(client.page, worktreeId)).tabs.find(
-          (tab) => tab.contentType === 'terminal' && !terminalsBefore.has(tab.id)
-        ) ?? null
-      await expect
-        .poll(findCreatedTerminal, {
-          timeout: 90_000,
-          message: 'paired client never materialized the new terminal'
-        })
-        .not.toBeNull()
+    const terminalsBefore = new Set(
+      (await readPanes(client.page, worktreeId)).tabs
+        .filter((tab) => tab.contentType === 'terminal')
+        .map((tab) => tab.id)
+    )
+    // Why: this is what the tab strip's "+" → Terminal item calls for that panel's group.
+    await client.page.evaluate(async (groupId) => {
+      await window.__store?.getState().openNewTerminalTabInActiveWorkspace(groupId)
+    }, rightGroupId)
+    const findCreatedTerminal = async () =>
+      (await readPanes(client.page, worktreeId)).tabs.find(
+        (tab) => tab.contentType === 'terminal' && !terminalsBefore.has(tab.id)
+      ) ?? null
+    await expect
+      .poll(findCreatedTerminal, {
+        timeout: 90_000,
+        message: 'paired client never materialized the new terminal'
+      })
+      .not.toBeNull()
 
-      const panes = await readPanes(client.page, worktreeId)
-      expect((await findCreatedTerminal())?.groupId).toBe(rightGroupId)
-      expect(contentTypesOf(panes, rightGroupId)).toEqual(['browser', 'terminal'])
-      expect(panes.activeGroupId).toBe(rightGroupId)
-    } finally {
-      await fixture.dispose()
-    }
+    const panes = await readPanes(client.page, worktreeId)
+    expect((await findCreatedTerminal())?.groupId).toBe(rightGroupId)
+    expect(contentTypesOf(panes, rightGroupId)).toEqual(['browser', 'terminal'])
+    expect(panes.activeGroupId).toBe(rightGroupId)
+  } finally {
+    await fixture.dispose()
   }
-)
+})
