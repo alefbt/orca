@@ -421,7 +421,241 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     await registry.retire()
     expect(retired).toBe(true)
   })
+
+  it('refuses a retain whose signal aborted before admission', async () => {
+    const routeFactory = vi.fn(() => createRoute())
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: routeFactory
+    })
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(registry.retain(nativeKey(1), controller.signal)).rejects.toThrow(
+      'browser_client_network_route_aborted'
+    )
+    expect(routeFactory).not.toHaveBeenCalled()
+  })
+
+  it('rejects a retain the moment its signal aborts mid-startup', async () => {
+    let resolveStart = (_address: { host: string; port: number }): void => {}
+    const route = createRoute(
+      new Promise((resolve) => {
+        resolveStart = resolve
+      })
+    )
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: () => route
+    })
+    const controller = new AbortController()
+    const retaining = registry.retain(nativeKey(1), controller.signal)
+    await flushMicrotasks()
+
+    controller.abort()
+
+    await expect(retaining).rejects.toThrow('browser_client_network_route_aborted')
+    resolveStart({ host: '127.0.0.1', port: 43123 })
+    await vi.waitFor(() => expect(route.close).toHaveBeenCalledOnce())
+  })
+
+  it('refuses a retain that waited out a closing route onto a retired registry', async () => {
+    const teardown = deferredTeardown()
+    const route = createRoute()
+    route.close.mockImplementation(() => teardown.promise)
+    const routeFactory = vi.fn(() => route)
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: routeFactory
+    })
+    const key = nativeKey(7)
+    const retained = await registry.retain(key, signal())
+    const releasing = retained.release()
+    const retaining = registry.retain(key, signal())
+
+    void registry.retire(new Error('authority replaced'))
+    teardown.resolve()
+    await releasing
+
+    await expect(retaining).rejects.toThrow('browser_client_network_route_registry_retired')
+    // A retired registry must never mint the replacement route the waiter was queued for.
+    expect(routeFactory).toHaveBeenCalledOnce()
+    expect(route.start).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a fully released key clean so final cleanup closes it only once', async () => {
+    const route = createRoute()
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    const retained = await registry.retain(nativeKey(1), signal())
+
+    await retained.release()
+    expect(route.close).toHaveBeenCalledOnce()
+
+    await registry.close()
+    expect(route.close).toHaveBeenCalledOnce()
+  })
+
+  it('never re-closes a route the registry already force-closed', async () => {
+    const route = createRoute()
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    const key = nativeKey(1)
+    const first = await registry.retain(key, signal())
+    const second = await registry.retain(key, signal())
+
+    await registry.close()
+    await first.release()
+    await second.release()
+
+    expect(route.close).toHaveBeenCalledOnce()
+  })
+
+  it('ignores a repeated release from the same page handle', async () => {
+    const route = createRoute()
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    const key = nativeKey(1)
+    const first = await registry.retain(key, signal())
+    const second = await registry.retain(key, signal())
+
+    await first.release()
+    await first.release()
+    expect(route.close).not.toHaveBeenCalled()
+
+    await second.release()
+    expect(route.close).toHaveBeenCalledOnce()
+  })
+
+  it('refuses a retain whose route came back on a different port', async () => {
+    const route = createRoute()
+    route.reconnect.mockResolvedValue({ host: '127.0.0.1', port: 43999 })
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    const key = nativeKey(1)
+    await registry.retain(key, signal())
+
+    await expect(registry.retain(key, signal())).rejects.toThrow(
+      'browser_client_network_route_address_changed'
+    )
+  })
+
+  it('refuses a reconnect that moved a retained route to a different port', async () => {
+    const route = createRoute()
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    await registry.retain(nativeKey(1), signal())
+    registry.suspend()
+    route.reconnect.mockResolvedValue({ host: '127.0.0.1', port: 43999 })
+
+    await expect(registry.reconnect()).rejects.toThrow(
+      'browser_client_network_route_address_changed'
+    )
+  })
+
+  it('fails retirement when a route refuses to suspend', async () => {
+    const route = createRoute()
+    route.suspend.mockImplementation(() => {
+      throw new Error('suspend refused')
+    })
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    await registry.retain(nativeKey(1), signal())
+
+    expect(() => registry.retire()).toThrow('Browser client network route suspension failed')
+
+    // A second retire must report the same failure without re-suspending an already suspended route.
+    await expect(registry.retire()).rejects.toThrow(
+      'Browser client network route suspension failed'
+    )
+    expect(route.suspend).toHaveBeenCalledOnce()
+  })
+
+  it('reports a failed final cleanup to an awaiting retirement', async () => {
+    const route = createRoute()
+    route.close.mockRejectedValue(new Error('route cleanup outcome unknown'))
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    await registry.retain(nativeKey(1), signal())
+    let retirementFailure: string | undefined
+    void registry.retire().catch((error: Error) => {
+      retirementFailure = error.message
+    })
+
+    await expect(registry.close()).rejects.toThrow('Browser client network route cleanup failed')
+    await flushMicrotasks()
+
+    expect(retirementFailure).toBe('Browser client network route cleanup failed')
+  })
+
+  it('refuses to report retirement for a registry whose close already failed', async () => {
+    const route = createRoute()
+    route.close.mockRejectedValue(new Error('route cleanup outcome unknown'))
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+    await registry.retain(nativeKey(1), signal())
+
+    await expect(registry.close()).rejects.toThrow('Browser client network route cleanup failed')
+
+    await expect(registry.retire()).rejects.toThrow('Browser client network route cleanup failed')
+  })
+
+  it('surfaces both the retain failure and its cleanup failure', async () => {
+    const route = createRoute()
+    route.start.mockRejectedValue(new Error('tunnel start failed'))
+    route.close.mockRejectedValue(new Error('route cleanup outcome unknown'))
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: vi.fn(() => route)
+    })
+
+    await expect(registry.retain(nativeKey(1), signal())).rejects.toMatchObject({
+      message: 'tunnel start failed',
+      errors: [
+        expect.objectContaining({ message: 'tunnel start failed' }),
+        expect.objectContaining({ message: 'route cleanup outcome unknown' })
+      ]
+    })
+  })
 })
+
+function nativeKey(revision: number): string {
+  return browserNetworkExecutionHostKey({ kind: 'native', runtimeId: 'runtime-a', revision })
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let index = 0; index < 10; index += 1) {
+    await Promise.resolve()
+  }
+}
 
 function deferredTeardown(): { promise: Promise<void>; resolve: () => void } {
   let resolve = (): void => {}
