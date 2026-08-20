@@ -27,6 +27,7 @@ import type {
   BrowserWorkspace
 } from '../../../shared/browser-workspace-types'
 import type { Tab, TabGroup, TabGroupLayoutNode } from '../../../shared/tab-types'
+import { reconcileClientOwnedTabPlacement } from './web-session-client-owned-tab-placement'
 import type { TerminalLayoutSnapshot, TerminalTab } from '../../../shared/terminal-tab-types'
 import type { OpenFile } from '../store/slices/editor'
 import { isTerminalLeafId, makePaneKey, parsePaneKey } from '../../../shared/stable-pane-id'
@@ -2517,27 +2518,30 @@ function applyWebSessionTabsSnapshotWithContext(
     terminalSurfaceTabs.map((tab) => toWebTerminalSurfaceTabId(tab.parentTabId))
   )
   const nextHostTerminalTabIds = new Set(terminalSurfaceTabs.map((tab) => tab.parentTabId))
-  const exactProvisionalHandoffs = new Set(
-    currentTerminalTabs
-      .filter((tab) => !isMirroredTerminalSurfaceId(tab.id))
-      .filter((tab) => {
-        if (nextHostTerminalTabIds.has(tab.id)) {
-          return true
-        }
-        const handoff = {
-          environmentId,
-          worktreeId,
-          provisionalTabId: tab.id
-        }
-        const hostTabId = resolveWebAgentSessionHandoff(handoff)
-        return (
-          hostTabId !== null &&
-          (nextHostTerminalTabIds.has(hostTabId) ||
-            isWebAgentSessionHandoffPostCreateSnapshotConfirmed(handoff))
-        )
-      })
-      .map((tab) => tab.id)
-  )
+  const provisionalHandoffHostTabIds = new Map<string, string>()
+  for (const tab of currentTerminalTabs) {
+    if (isMirroredTerminalSurfaceId(tab.id)) {
+      continue
+    }
+    if (nextHostTerminalTabIds.has(tab.id)) {
+      provisionalHandoffHostTabIds.set(tab.id, tab.id)
+      continue
+    }
+    const handoff = {
+      environmentId,
+      worktreeId,
+      provisionalTabId: tab.id
+    }
+    const hostTabId = resolveWebAgentSessionHandoff(handoff)
+    if (
+      hostTabId !== null &&
+      (nextHostTerminalTabIds.has(hostTabId) ||
+        isWebAgentSessionHandoffPostCreateSnapshotConfirmed(handoff))
+    ) {
+      provisionalHandoffHostTabIds.set(tab.id, hostTabId)
+    }
+  }
+  const exactProvisionalHandoffs = new Set(provisionalHandoffHostTabIds.keys())
   const retainedTerminalTabs = currentTerminalTabs.filter(
     (tab) =>
       !shouldReplaceTerminalTab(
@@ -2875,7 +2879,67 @@ function applyWebSessionTabsSnapshotWithContext(
       entry.clientGroupId ? [[entry.unifiedTab.id, entry.clientGroupId]] : []
     )
   )
+  // Why: once this worktree has client groups, placement is client-owned — snapshots may only
+  // append never-seen tabs, drop vanished ones, and honor explicit focus intent. Host order,
+  // host actives, and host layout apply only on first adoption (no client groups yet).
+  const clientOwnedPlacement = (() => {
+    if (currentGroups.length === 0 || !nextUnifiedTabs) {
+      return null
+    }
+    // Why: an entity-identical replacement (provisional terminal → mirrored surface, local
+    // editor → host editor tab) is a rename — its position and focus must carry over.
+    const rekeyedTabIds = new Map<string, string>()
+    for (const [provisionalTabId, hostTabId] of provisionalHandoffHostTabIds) {
+      const mirroredId = toWebTerminalSurfaceTabId(hostTabId)
+      if (mirroredId !== provisionalTabId) {
+        rekeyedTabIds.set(provisionalTabId, mirroredId)
+      }
+    }
+    for (const entry of mirroredEditorTabs) {
+      const existing = existingTabIndex.getEditorUnifiedTab(entry.file.id, entry.hostTabId)
+      if (existing && existing.id !== entry.unifiedTab.id) {
+        rekeyedTabIds.set(existing.id, entry.unifiedTab.id)
+      }
+    }
+    const knownGroupTabIds = new Set(
+      currentGroups.flatMap((group) =>
+        group.tabOrder.map((tabId) => rekeyedTabIds.get(tabId) ?? tabId)
+      )
+    )
+    // Why: a pending record is this client's own create intent — authoritative even when the
+    // provisional tab was provisionally adopted elsewhere or the target group record lags its leaf.
+    const placementMoves = mirroredBrowserTabs.flatMap((entry) => {
+      const recordedGroupId = peekWebSessionBrowserPlacementGroup({
+        environmentId,
+        worktreeId,
+        remotePageId: entry.remotePageId
+      })
+      return recordedGroupId ? [{ tabId: entry.unifiedTab.id, groupId: recordedGroupId }] : []
+    })
+    const adoptedTabs = mirroredUnifiedTabs
+      .filter((tab) => !knownGroupTabIds.has(tab.id))
+      .map((tab) => ({
+        tabId: tab.id,
+        groupId: clientGroupIdByLocalTabId.get(tab.id) ?? tab.groupId
+      }))
+    return reconcileClientOwnedTabPlacement({
+      currentGroups,
+      worktreeId,
+      validUnifiedTabIds,
+      adoptedTabs,
+      placementMoves,
+      rekeyedTabIds,
+      intentTabId: honorSnapshotActiveFocus ? (intentUnifiedTabId ?? null) : null,
+      currentActiveGroupId: state.activeGroupIdByWorktree[worktreeId] ?? null,
+      currentLayout: state.layoutByWorktree[worktreeId] ?? null,
+      isGroupReserved: (groupId) =>
+        isWebSessionBrowserPlacementGroupReserved({ worktreeId, groupId })
+    })
+  })()
   const nextGroups = (() => {
+    if (clientOwnedPlacement) {
+      return clientOwnedPlacement.groups
+    }
     if (!nextUnifiedTabs || nextUnifiedTabs.length === 0) {
       return null
     }
@@ -3168,11 +3232,33 @@ function applyWebSessionTabsSnapshotWithContext(
     sameBrowserTabs,
     batchContext
   )
+  // Why: under client-owned placement the reconciled groups are the membership truth;
+  // the unified tabs' groupId field must agree or TabBar filters them out of their strip.
+  const placedUnifiedTabs = (() => {
+    if (!clientOwnedPlacement?.groups || !nextUnifiedTabs) {
+      return nextUnifiedTabs
+    }
+    const groupIdByTabId = new Map(
+      clientOwnedPlacement.groups.flatMap((group) =>
+        group.tabOrder.map((tabId) => [tabId, group.id] as const)
+      )
+    )
+    let changed = false
+    const placed = nextUnifiedTabs.map((tab) => {
+      const groupId = groupIdByTabId.get(tab.id)
+      if (!groupId || groupId === tab.groupId) {
+        return tab
+      }
+      changed = true
+      return { ...tab, groupId }
+    })
+    return changed ? placed : nextUnifiedTabs
+  })()
   const nextUnifiedTabsByWorktree = withWorktreeEntry(
     state,
     'unifiedTabsByWorktree',
     worktreeId,
-    nextUnifiedTabs,
+    placedUnifiedTabs,
     sameUnifiedTabs,
     batchContext
   )
@@ -3184,12 +3270,13 @@ function applyWebSessionTabsSnapshotWithContext(
     sameGroups,
     batchContext
   )
-  const nextActiveGroupId =
-    // Why: status/title snapshots carry the host's last active tab; a client that already switched panes keeps its local group focus.
-    nextGroups?.find((group) => group.activeTabId === nextActiveUnifiedTabId)?.id ??
-    nextGroups?.find((group) => group.id === snapshot.activeGroupId)?.id ??
-    nextGroups?.[0]?.id ??
-    null
+  const nextActiveGroupId = clientOwnedPlacement
+    ? clientOwnedPlacement.activeGroupId
+    : // Why: status/title snapshots carry the host's last active tab; a client that already switched panes keeps its local group focus.
+      (nextGroups?.find((group) => group.activeTabId === nextActiveUnifiedTabId)?.id ??
+      nextGroups?.find((group) => group.id === snapshot.activeGroupId)?.id ??
+      nextGroups?.[0]?.id ??
+      null)
   const nextActiveGroupIdByWorktree =
     nextGroups && state.activeGroupIdByWorktree[worktreeId] !== nextActiveGroupId
       ? withWorktreeEntry(
@@ -3204,6 +3291,22 @@ function applyWebSessionTabsSnapshotWithContext(
   const nextLayoutByWorktree = (() => {
     if (!nextGroups) {
       return state.layoutByWorktree
+    }
+    if (clientOwnedPlacement) {
+      const clientLayout =
+        clientOwnedPlacement.layout ??
+        (nextActiveGroupId ? { type: 'leaf' as const, groupId: nextActiveGroupId } : null)
+      if (!clientLayout || tabGroupLayoutEqual(state.layoutByWorktree[worktreeId], clientLayout)) {
+        return state.layoutByWorktree
+      }
+      return withWorktreeEntry(
+        state,
+        'layoutByWorktree',
+        worktreeId,
+        clientLayout,
+        (current, next) => current === next,
+        batchContext
+      )
     }
     const validGroupIds = new Set(nextGroups.map((group) => group.id))
     const hostLayout = pruneTabGroupLayout(snapshot.tabGroupLayout, validGroupIds)
