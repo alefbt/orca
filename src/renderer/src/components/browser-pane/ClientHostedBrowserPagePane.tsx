@@ -2,10 +2,15 @@ import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useSta
 import { ArrowLeft, ArrowRight, Globe, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
-import type { BrowserPage as BrowserPageState } from '../../../../shared/browser-workspace-types'
+import { useAppStore } from '@/store'
+import type {
+  BrowserLoadError,
+  BrowserPage as BrowserPageState
+} from '../../../../shared/browser-workspace-types'
 import {
   normalizeBrowserNavigationUrl,
-  redactKagiSessionToken
+  redactKagiSessionToken,
+  toHttpsRecoveryUrl
 } from '../../../../shared/browser-url'
 import { ORCA_BROWSER_BLANK_URL } from '../../../../shared/constants'
 import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
@@ -21,6 +26,7 @@ import {
   reopenOnServerCaveat
 } from './ReopenBrowserPageOnServerButton'
 import BrowserAddressBar from './assemble-chrome/BrowserAddressBar'
+import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overlay'
 import type { BrowserPageUrlSetter, BrowserTabPageState } from './describe-page/browser-page-types'
 
 export function ClientHostedBrowserPagePane({
@@ -43,6 +49,7 @@ export function ClientHostedBrowserPagePane({
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const webviewRef = useRef<Electron.WebviewTag | null>(null)
   const addressBarInputRef = useRef<HTMLInputElement | null>(null)
+  const activeLoadFailureRef = useRef<BrowserLoadError | null>(null)
   const [addressBarValue, setAddressBarValue] = useState(toDisplayUrl(browserTab.url))
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const updatePageStateFromGuest = useEffectEvent(onUpdatePageState)
@@ -97,20 +104,46 @@ export function ClientHostedBrowserPagePane({
         loading: metadata.loading,
         canGoBack: metadata.canGoBack,
         canGoForward: metadata.canGoForward,
-        loadError: null
+        // Why: did-stop-loading fires after did-fail-load, so an unconditional null here
+        // would wipe the failure the overlay is about to show.
+        loadError: activeLoadFailureRef.current
       })
       publisher.publish(metadata)
       setAddressBarValue(toDisplayUrl(metadata.url))
     }
     const onStart = (): void => {
+      activeLoadFailureRef.current = null
       updatePageStateFromGuest(browserTab.id, { loading: true, loadError: null })
       publisher.publish(readClientPageMetadata(webview, undefined, true))
+    }
+    const onFailLoad = (event: Event): void => {
+      const failure = event as Event & {
+        errorCode?: number
+        errorDescription?: string
+        validatedURL?: string
+        isMainFrame?: boolean
+      }
+      // Why: Chromium reports redirect/cancel races as ERR_ABORTED (-3) even when the
+      // replacement navigation succeeds; subframe failures never blank the page.
+      if (failure.isMainFrame === false || failure.errorCode === -3) {
+        return
+      }
+      const loadError = {
+        code: failure.errorCode ?? 0,
+        description: failure.errorDescription || 'Navigation failed.',
+        validatedUrl: redactKagiSessionToken(
+          failure.validatedURL || webview.getURL() || 'about:blank'
+        )
+      }
+      activeLoadFailureRef.current = loadError
+      updatePageStateFromGuest(browserTab.id, { loading: false, loadError })
     }
     webview.addEventListener('did-start-loading', onStart)
     webview.addEventListener('did-stop-loading', syncNavigation)
     webview.addEventListener('did-navigate', syncNavigation)
     webview.addEventListener('did-navigate-in-page', syncNavigation)
     webview.addEventListener('page-title-updated', syncNavigation)
+    webview.addEventListener('did-fail-load', onFailLoad)
     syncNavigation()
     return () => {
       webview.removeEventListener('did-start-loading', onStart)
@@ -118,6 +151,7 @@ export function ClientHostedBrowserPagePane({
       webview.removeEventListener('did-navigate', syncNavigation)
       webview.removeEventListener('did-navigate-in-page', syncNavigation)
       webview.removeEventListener('page-title-updated', syncNavigation)
+      webview.removeEventListener('did-fail-load', onFailLoad)
       if (webviewRef.current === webview) {
         webviewRef.current = null
       }
@@ -144,13 +178,31 @@ export function ClientHostedBrowserPagePane({
 
   const navigateToUrl = useCallback(
     (value: string) => {
-      const nextUrl = normalizeBrowserNavigationUrl(value)
+      const { browserDefaultSearchEngine, browserKagiSessionLink } = useAppStore.getState()
+      // Why: the search-engine argument opts into search fallback; without it typed
+      // queries parse as hosts ("google maps" -> https://google%20maps/).
+      const nextUrl = normalizeBrowserNavigationUrl(value, browserDefaultSearchEngine, {
+        kagiSessionLink: browserKagiSessionLink
+      })
       const webview = webviewRef.current
-      if (!nextUrl || !webview) {
+      if (!nextUrl) {
+        onUpdatePageState(browserTab.id, {
+          loadError: {
+            code: 0,
+            description: 'Enter a valid http(s) or localhost URL.',
+            validatedUrl: redactKagiSessionToken(value.trim()) || 'about:blank'
+          }
+        })
         return
       }
+      if (!webview) {
+        return
+      }
+      activeLoadFailureRef.current = null
+      setAddressBarValue(toDisplayUrl(nextUrl))
       onUpdatePageState(browserTab.id, { loading: true, loadError: null })
-      void webview.loadURL(nextUrl)
+      // Why: loadURL rejects on any failed navigation; did-fail-load owns error reporting.
+      void webview.loadURL(nextUrl).catch(() => {})
     },
     [browserTab.id, onUpdatePageState]
   )
@@ -197,6 +249,16 @@ export function ClientHostedBrowserPagePane({
         />
       </div>
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden bg-background">
+        {!attachmentError && browserTab.loadError ? (
+          <BrowserLoadFailureOverlay
+            loadError={browserTab.loadError}
+            currentUrl={toDisplayUrl(browserTab.url)}
+            httpsRecoveryUrl={toHttpsRecoveryUrl(browserTab.url)}
+            onRetry={() => webviewRef.current?.reload()}
+            onTryHttps={navigateToUrl}
+            onCopy={(url) => void window.api.ui.writeClipboardText(url)}
+          />
+        ) : null}
         {attachmentError ? (
           <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
             <div className="flex max-w-sm flex-col items-center gap-2">

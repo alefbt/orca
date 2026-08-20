@@ -6,7 +6,8 @@ import type { BrowserPage } from '../../../../shared/browser-workspace-types'
 const mocks = vi.hoisted(() => ({
   attach: vi.fn(),
   call: vi.fn(),
-  createBrowserTab: vi.fn(async () => true)
+  createBrowserTab: vi.fn(async () => true),
+  addressBar: { current: null as { value: string; onNavigate: (value: string) => void } | null }
 }))
 
 vi.mock('@/runtime/web-runtime-session', () => ({
@@ -27,7 +28,10 @@ vi.mock('./browser-client-page-renderer-installation', () => ({
 }))
 
 vi.mock('./assemble-chrome/BrowserAddressBar', () => ({
-  default: ({ value }: { value: string }) => <input aria-label="Address" value={value} readOnly />
+  default: (props: { value: string; onNavigate: (value: string) => void }) => {
+    mocks.addressBar.current = props
+    return <input aria-label="Address" value={props.value} readOnly />
+  }
 }))
 
 import { ClientHostedBrowserPagePane } from './ClientHostedBrowserPagePane'
@@ -130,6 +134,103 @@ describe('ClientHostedBrowserPagePane', () => {
     expect((screen.getByLabelText('Address') as HTMLInputElement).value).toBe(
       'https://remote.internal/path'
     )
+  })
+
+  it('searches non-URL address input like the local pane instead of forcing a host', () => {
+    const { webview } = createWebview()
+    mocks.attach.mockReturnValue(retainedAttachment(webview))
+    const onUpdatePageState = vi.fn()
+    render(
+      <ClientHostedBrowserPagePane
+        browserTab={page()}
+        runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
+        placement={PLACEMENT}
+        isActive
+        onUpdatePageState={onUpdatePageState}
+        onSetUrl={vi.fn()}
+      />
+    )
+
+    act(() => mocks.addressBar.current?.onNavigate('google maps'))
+    expect(webview.loadURL).toHaveBeenCalledWith('https://www.google.com/search?q=google%20maps')
+
+    onUpdatePageState.mockClear()
+    act(() => mocks.addressBar.current?.onNavigate('javascript:alert(1)'))
+    expect(webview.loadURL).toHaveBeenCalledTimes(1)
+    expect(onUpdatePageState).toHaveBeenCalledWith(
+      'page-a',
+      expect.objectContaining({
+        loadError: expect.objectContaining({
+          description: 'Enter a valid http(s) or localhost URL.'
+        })
+      })
+    )
+  })
+
+  it('surfaces main-frame load failures and ignores aborted races', () => {
+    const { webview } = createWebview()
+    mocks.attach.mockReturnValue(retainedAttachment(webview))
+    const onUpdatePageState = vi.fn()
+    const view = render(
+      <ClientHostedBrowserPagePane
+        browserTab={page()}
+        runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
+        placement={PLACEMENT}
+        isActive
+        onUpdatePageState={onUpdatePageState}
+        onSetUrl={vi.fn()}
+      />
+    )
+    onUpdatePageState.mockClear()
+
+    act(() =>
+      webview.dispatchEvent(
+        Object.assign(new Event('did-fail-load'), {
+          errorCode: -3,
+          errorDescription: 'ERR_ABORTED',
+          validatedURL: 'https://replaced.internal/',
+          isMainFrame: true
+        })
+      )
+    )
+    expect(onUpdatePageState).not.toHaveBeenCalled()
+
+    act(() =>
+      webview.dispatchEvent(
+        Object.assign(new Event('did-fail-load'), {
+          errorCode: -105,
+          errorDescription: 'ERR_NAME_NOT_RESOLVED',
+          validatedURL: 'https://google%20maps/',
+          isMainFrame: true
+        })
+      )
+    )
+    const loadError = {
+      code: -105,
+      description: 'ERR_NAME_NOT_RESOLVED',
+      validatedUrl: 'https://google%20maps/'
+    }
+    expect(onUpdatePageState).toHaveBeenCalledWith('page-a', { loading: false, loadError })
+    // Why: did-stop-loading follows did-fail-load and must not wipe the failure.
+    onUpdatePageState.mockClear()
+    act(() => webview.dispatchEvent(new Event('did-stop-loading')))
+    expect(onUpdatePageState).toHaveBeenCalledWith('page-a', expect.objectContaining({ loadError }))
+
+    view.rerender(
+      <ClientHostedBrowserPagePane
+        browserTab={{ ...page(), loadError }}
+        runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
+        placement={PLACEMENT}
+        isActive
+        onUpdatePageState={onUpdatePageState}
+        onSetUrl={vi.fn()}
+      />
+    )
+    act(() => screen.getByText('Retry').click())
+    expect(webview.reload).toHaveBeenCalledTimes(1)
   })
 
   it('shows exact-generation unavailability without creating a fallback guest', () => {
