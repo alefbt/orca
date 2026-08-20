@@ -20,9 +20,7 @@ vi.mock('../../store', () => ({
 
 type RoutingSettings = Pick<
   GlobalSettings,
-  | 'browserSshWorkspaceRoutingEnabled'
-  | 'browserSshWorkspaceRoutingDisabledTargetIds'
-  | 'browserSshWorkspaceRoutingProbeSkippedTargetIds'
+  'browserSshWorkspaceRoutingEnabled' | 'browserSshWorkspaceRoutingDisabledTargetIds'
 >
 
 function renderSetting(
@@ -41,10 +39,9 @@ describe('BrowserSshWorkspaceRoutingSetting', () => {
     cleanup()
   })
 
-  it('hides both per-host lists when no host carries an override', () => {
+  it('hides the per-host list when no host opted out', () => {
     renderSetting({})
     expect(screen.queryByText(/browsing from this device/i)).toBeNull()
-    expect(screen.queryByText(/connection check/i)).toBeNull()
   })
 
   it('restores routing for an opted-out host via Use SSH host', () => {
@@ -54,16 +51,6 @@ describe('BrowserSshWorkspaceRoutingSetting', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use SSH host' }))
     expect(updateSettings).toHaveBeenCalledWith({
       browserSshWorkspaceRoutingDisabledTargetIds: []
-    })
-  })
-
-  it('clears a persisted Try-anyway via Check again so the probe runs again', () => {
-    const updateSettings = vi.fn()
-    renderSetting({ browserSshWorkspaceRoutingProbeSkippedTargetIds: ['target-a'] }, updateSettings)
-    expect(screen.getByText(/Try anyway/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
-    expect(updateSettings).toHaveBeenCalledWith({
-      browserSshWorkspaceRoutingProbeSkippedTargetIds: []
     })
   })
 })

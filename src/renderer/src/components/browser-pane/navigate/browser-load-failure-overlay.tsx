@@ -33,6 +33,8 @@ type BrowserLoadFailureOverlayProps = {
   onProceedCertificate?: (challengeId: string) => Promise<BrowserCertificateProceedResult>
   /** Set for SSH-routed pages: connection failures usually mean the SSH host cannot reach the site. */
   sshRoutedHint?: boolean
+  /** Set when the page's SSH host carries a persisted "Try anyway": undoes it so the connection check runs again. */
+  onRecheckSshRoute?: (() => void) | null
 }
 
 type CertificateProceedAttempt = {
@@ -127,7 +129,8 @@ export function BrowserLoadFailureOverlay({
   certificateFailure,
   expectedBrowserPageId,
   onProceedCertificate,
-  sshRoutedHint
+  sshRoutedHint,
+  onRecheckSshRoute
 }: BrowserLoadFailureOverlayProps): React.JSX.Element {
   const connectingTimerRef = useRef<{
     challengeId: string
@@ -292,6 +295,21 @@ export function BrowserLoadFailureOverlay({
               'browser.loadFailure.sshRoutedHint',
               "This page browses through the workspace's SSH host — the host may be disconnected or unable to reach this site."
             )}
+            {onRecheckSshRoute ? (
+              <>
+                {' '}
+                <Button
+                  type="button"
+                  variant="link"
+                  size="xs"
+                  className="h-auto px-0 align-baseline"
+                  data-testid="browser-load-failure-recheck-ssh-route"
+                  onClick={onRecheckSshRoute}
+                >
+                  {translate('browser.loadFailure.recheckSshRoute', 'Run connection check')}
+                </Button>
+              </>
+            ) : null}
           </p>
         ) : null}
         {activeProceedAttempt?.state === 'failed' && activeProceedAttempt.reason ? (

@@ -144,3 +144,29 @@ export function useSshWorkspaceBrowserRoute(
     }
   }
 }
+
+/**
+ * The undo for a persisted "Try anyway", surfaced where its cost shows up: on
+ * a routed page's load-failure overlay. Returns null unless this workspace's
+ * SSH target carries the skip; clearing it flips the route hooks back to
+ * probing, which resurfaces the classified card if forwarding is still blocked.
+ */
+export function useSshWorkspaceProbeSkipRecheck(worktreeId: string): (() => void) | null {
+  const executionHostId = useAppStore((s) => getExecutionHostIdForWorktree(s, worktreeId))
+  const probeSkippedTargetIds = useAppStore(
+    (s) => s.settings?.browserSshWorkspaceRoutingProbeSkippedTargetIds
+  )
+  const updateSettings = useAppStore((s) => s.updateSettings)
+  const parsed = parseExecutionHostId(executionHostId)
+  const targetId =
+    parsed?.kind === 'ssh' && !isRuntimeOwnedSshTargetId(parsed.targetId) ? parsed.targetId : null
+  if (!targetId || probeSkippedTargetIds?.includes(targetId) !== true) {
+    return null
+  }
+  return () =>
+    updateSettings({
+      browserSshWorkspaceRoutingProbeSkippedTargetIds: (probeSkippedTargetIds ?? []).filter(
+        (id) => id !== targetId
+      )
+    })
+}

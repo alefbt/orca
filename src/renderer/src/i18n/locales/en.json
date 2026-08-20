@@ -28,7 +28,8 @@
       "certificateChallengeChanged": "The certificate request changed. Retry the page and review the new warning.",
       "certificateChallengeUnavailable": "This certificate request is no longer available. Retry the page to request a new one.",
       "certificateProceedFailed": "Orca could not approve this certificate request. Retry the page and try again.",
-      "sshRoutedHint": "This page browses through the workspace's SSH host — the host may be disconnected or unable to reach this site."
+      "sshRoutedHint": "This page browses through the workspace's SSH host — the host may be disconnected or unable to reach this site.",
+      "recheckSshRoute": "Run connection check"
     },
     "guestRecovery": {
       "title": "Browser page stopped",

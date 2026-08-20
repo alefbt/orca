@@ -17,6 +17,7 @@ import type {
 } from '../../../../../shared/browser-workspace-types'
 import { BROWSER_GUEST_RECOVERY_ERROR_CODE } from '../host-guest/browser-page-guest-recovery'
 import { BrowserLoadFailureOverlay } from '../navigate/browser-load-failure-overlay'
+import { useSshWorkspaceProbeSkipRecheck } from '../use-ssh-workspace-browser-route'
 import BrowserFind from './BrowserFind'
 import { MarkupOverlay } from '../annotate/MarkupOverlay'
 import type { MarkupModeController } from '../annotate/useMarkupMode'
@@ -82,6 +83,7 @@ export function BrowserPageViewportOverlays({
   annotationSend: ReturnType<typeof useBrowserPageAnnotationSend>
   grabAnnotations: ReturnType<typeof useBrowserPageGrabAnnotations>
 }): React.JSX.Element {
+  const recheckSshRoute = useSshWorkspaceProbeSkipRecheck(worktreeId)
   const {
     pendingAnnotationPayload,
     handleAddBrowserAnnotation,
@@ -158,6 +160,7 @@ export function BrowserPageViewportOverlays({
           onOpenExternal={(url) => void window.api.shell.openUrl(url)}
           certificateFailure={certificateFailure}
           sshRoutedHint={sshRouted}
+          onRecheckSshRoute={sshRouted ? recheckSshRoute : null}
           expectedBrowserPageId={browserTab.id}
           onProceedCertificate={(challengeId) =>
             window.api.browser.proceedCertificate({

@@ -13,9 +13,7 @@ import {
 type BrowserSshWorkspaceRoutingSettingProps = {
   settings: Pick<
     GlobalSettings,
-    | 'browserSshWorkspaceRoutingEnabled'
-    | 'browserSshWorkspaceRoutingDisabledTargetIds'
-    | 'browserSshWorkspaceRoutingProbeSkippedTargetIds'
+    'browserSshWorkspaceRoutingEnabled' | 'browserSshWorkspaceRoutingDisabledTargetIds'
   >
   updateSettings: (updates: Partial<GlobalSettings>) => void
 }
@@ -28,7 +26,6 @@ export function BrowserSshWorkspaceRoutingSetting({
   const description = getBrowserSshWorkspaceRoutingDescription()
   const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
   const disabledTargetIds = settings.browserSshWorkspaceRoutingDisabledTargetIds ?? []
-  const probeSkippedTargetIds = settings.browserSshWorkspaceRoutingProbeSkippedTargetIds ?? []
 
   return (
     <SearchableSetting
@@ -109,36 +106,6 @@ export function BrowserSshWorkspaceRoutingSetting({
                 }
               >
                 {translate('settings.browser.sshWorkspaceRouting.useHost', 'Use SSH host')}
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {probeSkippedTargetIds.length > 0 ? (
-        <div className="mt-2 flex flex-col gap-1.5">
-          <div className="text-xs text-muted-foreground">
-            {translate(
-              'settings.browser.sshWorkspaceRouting.probeSkippedHosts',
-              'Hosts routed without the connection check (Try anyway):'
-            )}
-          </div>
-          {probeSkippedTargetIds.map((targetId) => (
-            <div key={targetId} className="flex items-center gap-2 text-xs text-foreground">
-              <span className="min-w-0 truncate">{sshTargetLabels.get(targetId) ?? targetId}</span>
-              <Button
-                type="button"
-                variant="link"
-                size="xs"
-                className="h-auto px-0"
-                onClick={() =>
-                  updateSettings({
-                    browserSshWorkspaceRoutingProbeSkippedTargetIds: probeSkippedTargetIds.filter(
-                      (id) => id !== targetId
-                    )
-                  })
-                }
-              >
-                {translate('settings.browser.sshWorkspaceRouting.probeAgain', 'Check again')}
               </Button>
             </div>
           ))}
