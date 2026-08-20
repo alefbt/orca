@@ -41,11 +41,24 @@ describe('browser client page unavailability', () => {
     expect(renderer.retirePage).not.toHaveBeenCalled()
     expect(executor.snapshotPageInventory()).toEqual([])
   })
+
+  it('releases the page availability watch when the page retires', async () => {
+    const { executor, releaseAvailabilityWatch } = harness()
+    await executor.handle(createCommand(), new AbortController().signal)
+    expect(releaseAvailabilityWatch).not.toHaveBeenCalled()
+
+    await expect(executor.retirePage('page-a', 7)).resolves.toBe(true)
+
+    expect(releaseAvailabilityWatch).toHaveBeenCalledOnce()
+  })
 })
 
 function harness() {
   let rendererCurrent = true
   let availabilityListener: ((page: BrowserRoutePageGuestIdentity) => void) | null = null
+  const releaseAvailabilityWatch = vi.fn(() => {
+    availabilityListener = null
+  })
   const renderer = {
     rendererWebContentsId: 11,
     isCurrent: vi.fn(() => rendererCurrent),
@@ -83,9 +96,7 @@ function harness() {
       beginGuestRetirement: vi.fn(() => Promise.resolve()),
       watchPageAvailability: vi.fn((_browserPageId, listener) => {
         availabilityListener = listener
-        return () => {
-          availabilityListener = null
-        }
+        return releaseAvailabilityWatch
       })
     },
     executeAutomation: vi.fn(async () => ({})),
@@ -96,6 +107,7 @@ function harness() {
   return {
     executor,
     onPageUnavailable,
+    releaseAvailabilityWatch,
     renderer,
     reportUnavailable: (page: BrowserRoutePageGuestIdentity) => availabilityListener?.(page),
     setRendererCurrent: (value: boolean) => {

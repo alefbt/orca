@@ -310,4 +310,23 @@ describe('browser client page reconciliation adapters', () => {
     expect(routeWebContents.beginGuestRetirement).toHaveBeenCalledOnce()
     expect(executor.snapshotPageInventory()).toEqual([])
   })
+
+  it('destroys a guest rekeyed during an authority transition instead of granting navigation', async () => {
+    const { executor, renderer, routeWebContents } = createHarness()
+    await executor.handle(command('createPage'), new AbortController().signal)
+    renderer.rekeyPage.mockImplementationOnce(async () => {
+      executor.beginAuthorityTransition()
+    })
+
+    await expect(
+      executor.handle(command('reclaimPage'), new AbortController().signal)
+    ).resolves.toEqual({
+      status: 'failed',
+      errorCode: 'browser_client_page_executor_closed'
+    })
+
+    expect(routeWebContents.grantReconciledNavigation).not.toHaveBeenCalled()
+    expect(routeWebContents.beginGuestRetirement).toHaveBeenCalledOnce()
+    expect(executor.snapshotPageInventory()).toEqual([])
+  })
 })

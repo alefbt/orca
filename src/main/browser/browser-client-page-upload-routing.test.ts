@@ -262,4 +262,31 @@ describe('client-placed browser.upload routing', () => {
 
     expect(await readdir(stagingRoot)).toHaveLength(0)
   })
+
+  it('reports staged copies the close could not remove', async () => {
+    const transport = negotiatedTransport('remote-bytes')
+    const { executor } = createHarness({
+      fileChannel: transport,
+      uploadStaging: new BrowserClientUploadStaging(stagingRoot, {
+        mkdir: async () => {},
+        writeFile: async () => {},
+        removeDirectorySync: () => {},
+        removeDirectory: async () => {
+          throw new Error('EBUSY: resource busy or locked')
+        }
+      })
+    })
+    await executor.handle(createPage, new AbortController().signal)
+    await executor.handle(uploadCommand(['docs/report.pdf']), new AbortController().signal)
+    // The busy directory fails the close command, so the copies are still staged at shutdown.
+    await executor.handle(closePageCommand(), new AbortController().signal)
+
+    // Why: leaving staged bytes behind silently is how a fenced host keeps another user's files.
+    await expect(executor.close()).rejects.toMatchObject({
+      message: 'Browser client page executor cleanup failed',
+      errors: expect.arrayContaining([
+        expect.objectContaining({ message: 'Browser client upload staging release failed' })
+      ])
+    })
+  })
 })
