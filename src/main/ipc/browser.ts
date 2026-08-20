@@ -99,6 +99,26 @@ export function registerBrowserHandlers(): void {
     registerGuest(event, args, false)
   )
 
+  // Why: an SSH workspace's page may only mount on a proxy-verified partition,
+  // so the renderer asks main to prepare it and blocks the webview until then.
+  ipcMain.handle(
+    'browser:prepareSshWorkspacePartition',
+    async (_event, args: { targetId?: unknown; browserProfileId?: unknown }) => {
+      if (typeof args?.targetId !== 'string' || args.targetId.length === 0) {
+        throw new Error('browser_local_route_target_invalid')
+      }
+      const { prepareLocalSshBrowserPartition } =
+        await import('../browser/local-ssh-browser-partitions')
+      return prepareLocalSshBrowserPartition({
+        targetId: args.targetId,
+        browserProfileId:
+          typeof args.browserProfileId === 'string' && args.browserProfileId.length > 0
+            ? args.browserProfileId
+            : 'default'
+      })
+    }
+  )
+
   ipcMain.handle('browser:repairGuestRegistration', (event, args: BrowserGuestRegistrationArgs) =>
     registerGuest(event, args, true)
   )

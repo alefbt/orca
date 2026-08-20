@@ -2348,7 +2348,16 @@ void app.whenReady().then(async () => {
   // Why: browser sessions serve desktop webviews and runtime profile commands, so init at app startup rather than via a renderer IPC path.
   initializeBrowserSessionsForApp({
     orcaProfileId: activeOrcaProfile.profile.id,
-    profileDirectory: activeOrcaProfile.profileDirectory
+    profileDirectory: activeOrcaProfile.profileDirectory,
+    // Why: local direct-SSH partitions are scoped to targets, and the orphan
+    // sweep must see the live target list or it would clear their cookie jars.
+    listLocalSshTargetIds: () => {
+      if (!store) {
+        // Why: an empty list would read as "every SSH jar is an orphan"; throwing skips the sweep.
+        throw new Error('ssh target store unavailable at partition sweep')
+      }
+      return store.getSshTargets().map((target) => target.id)
+    }
   })
   unsubscribeSystemResumeBroadcast = registerSystemResumeBroadcast()
   agentAwakeService = new AgentAwakeService()

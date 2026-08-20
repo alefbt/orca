@@ -38,6 +38,11 @@ export function browserNetworkExecutionHostStorageIdentity(
   return storageIdentity(['ssh', host.targetId])
 }
 
+/** Storage identity of an SSH target, for local direct-SSH callers with no authority record. */
+export function sshExecutionHostStorageIdentity(targetId: string): string {
+  return storageIdentity(['ssh', targetId])
+}
+
 /** Storage identity of the paired server's own machine, for callers with no execution-host record. */
 export function browserAuthorityExecutionHostStorageIdentity(authorityStorageKey: string): string {
   return storageIdentity(['authority', authorityStorageKey])

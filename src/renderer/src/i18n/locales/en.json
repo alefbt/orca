@@ -55,6 +55,12 @@
       "pending": "Reopening…",
       "caveat": "This opens a new page on the remote host at this page’s last address. Signed-in and other transient page state may differ, and a page that came from a form submission opens blank.",
       "failed": "Couldn't open this page on the remote host. Check the connection and try again."
+    },
+    "sshRoute": {
+      "preparingTitle": "Connecting through the SSH host",
+      "errorTitle": "SSH browser routing unavailable",
+      "errorDescription": "Pages in this workspace browse through its SSH host, and that connection is not available right now.",
+      "retry": "Retry"
     }
   },
   "githubChecks": {
@@ -94,6 +100,10 @@
       "clientHostedRemote": {
         "title": "Host remote browser pages on this device",
         "description": "Render remote workspace pages on this desktop; network traffic still goes through the remote host. Applies to new pages only."
+      },
+      "sshWorkspaceRouting": {
+        "title": "Browse through SSH workspace hosts",
+        "description": "Browser pages in SSH workspaces send their traffic through the workspace's SSH host, with DNS resolved there. Off means pages browse from this machine."
       }
     }
   },
@@ -14718,6 +14728,16 @@
                     "results": {
                       "title": "Find the results",
                       "body": "Runs show when automations ran, what happened, and where to inspect their output."
+                    }
+                  },
+                  "client": {
+                    "hosted": {
+                      "browser": {
+                        "intro": {
+                          "title": "This page renders on your desktop",
+                          "body": "Remote browser tabs now render on this device. Network traffic still goes through the remote host."
+                        }
+                      }
                     }
                   }
                 }

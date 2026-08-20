@@ -17,6 +17,7 @@ import type { BrowserFindShortcutScope } from '../describe-page/browser-page-typ
 import { RemoteBrowserPagePane } from '../stream-remote/remote-browser-page-pane'
 import { ClientHostedBrowserPagePane } from '../ClientHostedBrowserPagePane'
 import { BrowserPagePane } from './browser-page-pane'
+import { SshRoutedBrowserPageGate } from './ssh-routed-browser-page-gate'
 
 export default function BrowserPane({
   browserTab,
@@ -123,31 +124,38 @@ export default function BrowserPane({
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col">
       {renderedBrowserPages.length > 0 ? (
-        <div className="relative flex min-h-0 flex-1">
-          {renderedBrowserPages.map((page) => (
-            <BrowserPagePane
-              key={page.id}
-              browserTab={page}
-              workspaceId={browserTab.id}
-              worktreeId={browserTab.worktreeId}
-              sessionProfileId={browserTab.sessionProfileId ?? null}
-              sessionPartition={browserTab.sessionPartition ?? null}
-              isActive={isActive && page.id === activeBrowserPage?.id}
-              findShortcutScope={
-                page.id === activeBrowserPage?.id ? resolvedFindShortcutScope : 'inactive'
-              }
-              isAutomationVisible={automationVisiblePageIds.has(page.id)}
-              isMobileDriven={mobileDrivenPageIds.has(page.id)}
-              inputLocked={activeBrowserDriver.kind === 'mobile'}
-              onUpdatePageState={updateBrowserPageState}
-              onSetUrl={setBrowserPageUrl}
-            />
-          ))}
-          <BrowserMobileDriverOverlay
-            driver={activeBrowserDriver}
-            onTakeBack={reclaimActiveBrowserForDesktop}
-          />
-        </div>
+        <SshRoutedBrowserPageGate
+          worktreeId={browserTab.worktreeId}
+          sessionProfileId={browserTab.sessionProfileId ?? null}
+        >
+          {(routedPartition) => (
+            <div className="relative flex min-h-0 flex-1">
+              {renderedBrowserPages.map((page) => (
+                <BrowserPagePane
+                  key={page.id}
+                  browserTab={page}
+                  workspaceId={browserTab.id}
+                  worktreeId={browserTab.worktreeId}
+                  sessionProfileId={browserTab.sessionProfileId ?? null}
+                  sessionPartition={routedPartition ?? browserTab.sessionPartition ?? null}
+                  isActive={isActive && page.id === activeBrowserPage?.id}
+                  findShortcutScope={
+                    page.id === activeBrowserPage?.id ? resolvedFindShortcutScope : 'inactive'
+                  }
+                  isAutomationVisible={automationVisiblePageIds.has(page.id)}
+                  isMobileDriven={mobileDrivenPageIds.has(page.id)}
+                  inputLocked={activeBrowserDriver.kind === 'mobile'}
+                  onUpdatePageState={updateBrowserPageState}
+                  onSetUrl={setBrowserPageUrl}
+                />
+              ))}
+              <BrowserMobileDriverOverlay
+                driver={activeBrowserDriver}
+                onTakeBack={reclaimActiveBrowserForDesktop}
+              />
+            </div>
+          )}
+        </SshRoutedBrowserPageGate>
       ) : null}
     </div>
   )

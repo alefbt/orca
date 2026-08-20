@@ -16,6 +16,10 @@ import { getAppIconPath } from '../app-icon'
 import { browserManager } from '../browser/browser-manager'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
 import {
+  enforceLocalSshWebRtcPolicyForGuest,
+  isLocalSshBrowserPartition
+} from '../browser/local-ssh-browser-partitions'
+import {
   browserRouteSessionRegistry,
   browserRouteWebContentsRegistry
 } from '../browser/browser-route-session-runtime'
@@ -485,11 +489,15 @@ export function createMainWindow(
     const partition = typeof webPreferences.partition === 'string' ? webPreferences.partition : ''
     const isProfilePartition = browserSessionRegistry.isAllowedPartition(partition)
     const isRoutePartition = browserRouteSessionRegistry.isAllowedPartition(partition)
+    // Why: local direct-SSH partitions exist only after their proxy is verified,
+    // so admission here can never race an unproxied session. They navigate like
+    // profile partitions — the renderer owns their URLs, no main-side grants.
+    const isLocalSshPartition = isLocalSshBrowserPartition(partition)
 
     // Why: fail closed — deny any src or partition not in the registry allowlist so a renderer bug can't smuggle preload/Node into an unprivileged guest.
     if (
       !normalizedSrc ||
-      (!isProfilePartition && !isRoutePartition) ||
+      (!isProfilePartition && !isRoutePartition && !isLocalSshPartition) ||
       (isRoutePartition && normalizedSrc !== ORCA_BROWSER_BLANK_URL)
     ) {
       event.preventDefault()
@@ -520,6 +528,8 @@ export function createMainWindow(
     browserManager.attachGuestPolicies(guest)
     // Why: route guests override the generic popup fallback and stay blank until exact main-owned registration.
     browserRouteWebContentsRegistry.attachGuest(guest)
+    // Why: the session proxy cannot stop WebRTC UDP; only the per-contents policy does.
+    enforceLocalSshWebRtcPolicyForGuest(guest)
   })
 
   // Why: mirror markdown-editor focus so before-input-event skips Cmd/Ctrl+B while TipTap owns focus (docs/markdown-cmd-b-bold-design.md).

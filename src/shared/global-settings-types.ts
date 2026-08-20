@@ -246,6 +246,8 @@ export type GlobalSettings = {
   floatingTerminalEnabled: boolean
   /** Main-side new-page kill switch for paired Electron client-hosted browser placement. */
   browserClientHostedRemoteEnabled?: boolean
+  /** Routes SSH-workspace browser pages through the workspace's SSH host; off = plain local browsing. */
+  browserSshWorkspaceRoutingEnabled?: boolean
   /** One-shot migration flag for the floating-workspace default-on rollout; after migration an explicit off sticks. */
   floatingTerminalDefaultedForAllUsers?: boolean
   /** Start dir for new floating-workspace terminal tabs; empty or '~' = home dir. */

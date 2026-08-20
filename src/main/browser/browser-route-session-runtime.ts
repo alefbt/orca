@@ -8,6 +8,10 @@ import {
 import { releaseEvictedBrowserRoutePartitionStorage } from './browser-route-partition-storage-dependencies'
 import { isBrowserRouteGuestPopup } from './browser-route-guest-popup-ownership'
 import { browserManager } from './browser-manager'
+import {
+  isBrowserRoutePartitionRetainedByAnyOwner,
+  registerBrowserRoutePartitionRetentionProbe
+} from './browser-route-partition-retention'
 import { BrowserRouteSessionRegistry } from './browser-route-session-registry'
 import { BrowserRouteWebContentsRegistry } from './browser-route-webcontents-registry'
 import { browserSessionRegistry } from './browser-session-registry'
@@ -19,7 +23,7 @@ const routeWebContentsRegistryRef: {
 // Why: a retained partition's storage is in use right now, so eviction must never pick it.
 const currentBindingStore = (): BrowserRoutePartitionBindingStore =>
   currentBrowserRoutePartitionBindingStore({
-    isPartitionRetained: (partition) => browserRouteSessionRegistry.isPartitionRetained(partition)
+    isPartitionRetained: isBrowserRoutePartitionRetainedByAnyOwner
   })
 
 const bindingStore = {
@@ -48,11 +52,16 @@ export const browserRouteSessionRegistry = new BrowserRouteSessionRegistry({
     routeWebContentsRegistryRef.current?.retirePageAuthority(retirement) ?? false,
   bindingStore,
   releaseEvictedPartitions: (partitions) => {
-    void releaseEvictedBrowserRoutePartitionStorage(partitions, (partition) =>
-      browserRouteSessionRegistry.isPartitionRetained(partition)
+    void releaseEvictedBrowserRoutePartitionStorage(
+      partitions,
+      isBrowserRoutePartitionRetainedByAnyOwner
     )
   }
 })
+
+registerBrowserRoutePartitionRetentionProbe((partition) =>
+  browserRouteSessionRegistry.isPartitionRetained(partition)
+)
 
 export const browserRouteWebContentsRegistry = new BrowserRouteWebContentsRegistry({
   getPartitionForSession: (routeSession) =>

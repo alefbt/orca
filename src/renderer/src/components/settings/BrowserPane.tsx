@@ -15,6 +15,7 @@ import { BrowserLinkRoutingModifierSetting } from './BrowserLinkRoutingModifierS
 import { BrowserTerminalLinkActionsSetting } from './BrowserTerminalLinkActionsSetting'
 import { BrowserLocalhostWorktreeLabelsSetting } from './BrowserLocalhostWorktreeLabelsSetting'
 import { BrowserClientHostedRemoteSetting } from './BrowserClientHostedRemoteSetting'
+import { BrowserSshWorkspaceRoutingSetting } from './BrowserSshWorkspaceRoutingSetting'
 import { BrowserSessionCookiesSection } from './BrowserSessionCookiesSection'
 import { BrowserNewProfileDialog } from './BrowserNewProfileDialog'
 import {
@@ -113,6 +114,9 @@ export function BrowserPane({
   const showCookies = matchesSettingsSearch(searchQuery, [getBrowserPaneSearchEntries()[7]])
   const showClientHostedRemote = matchesSettingsSearch(searchQuery, [
     getBrowserPaneSearchEntries()[8]
+  ])
+  const showSshWorkspaceRouting = matchesSettingsSearch(searchQuery, [
+    getBrowserPaneSearchEntries()[9]
   ])
   const showBrowserUse = matchesSettingsSearch(searchQuery, getBrowserUsePaneSearchEntries())
   const isMac = isMacUserAgent()
@@ -279,6 +283,10 @@ export function BrowserPane({
 
       {showClientHostedRemote ? (
         <BrowserClientHostedRemoteSetting settings={settings} updateSettings={updateSettings} />
+      ) : null}
+
+      {showSshWorkspaceRouting ? (
+        <BrowserSshWorkspaceRoutingSetting settings={settings} updateSettings={updateSettings} />
       ) : null}
 
       {showCookies ? (

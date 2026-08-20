@@ -3005,6 +3005,12 @@ const api = {
     sessionListProfiles: (): Promise<unknown[]> =>
       ipcRenderer.invoke('browser:session:listProfiles'),
 
+    prepareSshWorkspacePartition: (args: {
+      targetId: string
+      browserProfileId?: string
+    }): Promise<{ partition: string }> =>
+      ipcRenderer.invoke('browser:prepareSshWorkspacePartition', args),
+
     sessionCreateProfile: (args: {
       scope: 'default' | 'isolated' | 'imported'
       label: string

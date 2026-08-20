@@ -2400,6 +2400,9 @@ function createBrowserApi(): NonNullable<Partial<PreloadApi>['browser']> {
     onGrabModeToggle: () => noopUnsubscribe,
     onGrabActionShortcut: () => noopUnsubscribe,
     sessionListProfiles: () => Promise.resolve([]),
+    // Web clients render remote workspaces through the server; no local SSH routing exists.
+    prepareSshWorkspacePartition: () =>
+      Promise.reject(new Error('browser_local_route_unavailable')),
     sessionCreateProfile: () => Promise.resolve(null),
     sessionDeleteProfile: () => Promise.resolve(false),
     sessionImportCookies: () =>
