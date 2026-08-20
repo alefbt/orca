@@ -63,8 +63,14 @@ function showRetainedHost(host: HTMLDivElement, container: HTMLElement): () => v
   host.inert = false
   host.removeAttribute('aria-hidden')
   host.style.pointerEvents = 'auto'
+  let appliedBounds = ''
   const syncViewport = (): void => {
     const bounds = container.getBoundingClientRect()
+    const next = `${bounds.left}|${bounds.top}|${bounds.width}|${bounds.height}`
+    if (next === appliedBounds) {
+      return
+    }
+    appliedBounds = next
     Object.assign(host.style, {
       left: `${bounds.left}px`,
       top: `${bounds.top}px`,
@@ -76,8 +82,21 @@ function showRetainedHost(host: HTMLDivElement, container: HTMLElement): () => v
   observer?.observe(container)
   window.addEventListener('resize', syncViewport)
   window.addEventListener('scroll', syncViewport, true)
+  // Why: a pane can MOVE without resizing (tab dragged across an even split, sidebar toggles),
+  // which fires no resize/scroll event — the overlay would keep painting at the old pane's rect.
+  let positionFrame: number | null = null
+  const trackPosition = (): void => {
+    syncViewport()
+    positionFrame = requestAnimationFrame(trackPosition)
+  }
+  if (typeof requestAnimationFrame === 'function') {
+    positionFrame = requestAnimationFrame(trackPosition)
+  }
   syncViewport()
   return () => {
+    if (positionFrame !== null) {
+      cancelAnimationFrame(positionFrame)
+    }
     observer?.disconnect()
     window.removeEventListener('resize', syncViewport)
     window.removeEventListener('scroll', syncViewport, true)

@@ -742,7 +742,10 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
           worktreeId,
           environmentId: runtimeEnvironmentId,
           url: defaultUrl,
-          targetGroupId: groupId
+          // Why: desktop pane groups are client-owned — the local reconciler only honors a
+          // recorded clientTargetGroupId; targetGroupId steers snapshot-driven clients instead.
+          targetGroupId: groupId,
+          clientTargetGroupId: groupId
         })
         if (created) {
           get().recordFeatureInteraction('browser-tab-created')
