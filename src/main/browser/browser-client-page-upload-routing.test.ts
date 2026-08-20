@@ -71,13 +71,21 @@ function closePageCommand(): BrowserClientHostCommandEvent {
   } as never)
 }
 
-function createHarness(options: { fileChannel?: BrowserClientFileChannelTransport } = {}) {
-  const uploadStaging = new BrowserClientUploadStaging(stagingRoot)
+function createHarness(
+  options: {
+    fileChannel?: BrowserClientFileChannelTransport
+    uploadStaging?: BrowserClientUploadStaging
+  } = {}
+) {
+  const uploadStaging = options.uploadStaging ?? new BrowserClientUploadStaging(stagingRoot)
   const automationCalls: { params: { files?: unknown } }[] = []
   const executeAutomation = vi.fn(async (input: { params: { files?: unknown } }) => {
     automationCalls.push(input)
     return { uploaded: true }
   })
+  const retireRendererPage = vi.fn(async () => {})
+  const releaseRouteSession = vi.fn(() => {})
+  const releaseNetworkRoute = vi.fn(async () => {})
   const executor = new BrowserClientPageCommandExecutor({
     orcaProfileId: 'orca-profile-a',
     authorityConnectionIdentity: 'authority-a',
@@ -85,15 +93,15 @@ function createHarness(options: { fileChannel?: BrowserClientFileChannelTranspor
       key: 'execution-a',
       executionHostIdentity: 'execution-record-a',
       proxyEndpoint: { host: '127.0.0.1' as const, port: 43123 },
-      release: async () => {}
+      release: releaseNetworkRoute
     }),
     selectRenderer: () => ({
       rendererWebContentsId: 11,
       isCurrent: () => true,
       mountPage: async () => ({ webContentsId: 41 }),
-      retirePage: async () => {}
+      retirePage: retireRendererPage
     }),
-    routeSessions: { preparePage: async () => ({ partition, release: () => {} }) },
+    routeSessions: { preparePage: async () => ({ partition, release: releaseRouteSession }) },
     routeWebContents: {
       claimGuestLifecycle: (registration: BrowserRoutePageGuestIdentity) => ({
         registration: { ...registration },
@@ -113,7 +121,15 @@ function createHarness(options: { fileChannel?: BrowserClientFileChannelTranspor
     fileChannel: options.fileChannel,
     uploadStaging
   } as never)
-  return { executor, executeAutomation, automationCalls, uploadStaging }
+  return {
+    executor,
+    executeAutomation,
+    automationCalls,
+    uploadStaging,
+    retireRendererPage,
+    releaseRouteSession,
+    releaseNetworkRoute
+  }
 }
 
 function negotiatedTransport(contents: string): BrowserClientFileChannelTransport {
@@ -205,6 +221,35 @@ describe('client-placed browser.upload routing', () => {
     expect(await readdir(stagingRoot)).toHaveLength(
       BROWSER_CLIENT_UPLOAD_STAGING_MAX_COMMANDS_PER_PAGE
     )
+  })
+
+  it('retires the guest and releases the route when the staged copies cannot be removed', async () => {
+    const transport = negotiatedTransport('remote-bytes')
+    const { executor, retireRendererPage, releaseRouteSession, releaseNetworkRoute } =
+      createHarness({
+        fileChannel: transport,
+        // Why: Chromium still holding a staged file open is EBUSY on Windows, and the partition is
+        // only reclaimed once the guest and its route session are gone.
+        uploadStaging: new BrowserClientUploadStaging(stagingRoot, {
+          mkdir: async () => {},
+          writeFile: async () => {},
+          removeDirectorySync: () => {},
+          removeDirectory: async () => {
+            throw new Error('EBUSY: resource busy or locked')
+          }
+        })
+      })
+    await executor.handle(createPage, new AbortController().signal)
+    await executor.handle(uploadCommand(['docs/report.pdf']), new AbortController().signal)
+
+    expect(await executor.handle(closePageCommand(), new AbortController().signal)).toEqual({
+      status: 'failed',
+      errorCode: 'browser_client_page_command_failed'
+    })
+
+    expect(retireRendererPage).toHaveBeenCalled()
+    expect(releaseRouteSession).toHaveBeenCalled()
+    expect(releaseNetworkRoute).toHaveBeenCalled()
   })
 
   it('removes every staged copy when the executor closes', async () => {
