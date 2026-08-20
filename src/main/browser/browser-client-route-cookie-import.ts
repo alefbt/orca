@@ -47,6 +47,18 @@ export async function importCookiesIntoClientRoutePartition(
     return { ok: false, reason: error instanceof Error ? error.message : String(error) }
   }
   const result = await importCookiesFromBrowser(browser.source, partition)
+  // Why: the import runs for seconds. A host replacement inside that window retargets the
+  // route, so reporting success here would badge a partition no page will ever read from.
+  const settled = settledRoutePartition(request)
+  if (settled !== partition) {
+    return {
+      ok: false,
+      reason:
+        settled === null
+          ? 'The connection to this server ended during the import. Reconnect and try again.'
+          : 'This server was re-paired during the import. Try again.'
+    }
+  }
   if (!result.ok) {
     return result
   }
@@ -56,6 +68,19 @@ export async function importCookiesIntoClientRoutePartition(
     importedAt: Date.now()
   })
   return { ...result, profileId: request.browserProfileId }
+}
+
+/** Partition the route resolves to now, or null when the host no longer serves this environment. */
+function settledRoutePartition(request: ClientRouteCookieImportRequest): string | null {
+  const routeIdentity = getPairedRuntimeBrowserClientRouteIdentity(request.environmentId)
+  if (!routeIdentity) {
+    return null
+  }
+  try {
+    return bindRoutePartition(routeIdentity, request.browserProfileId)
+  } catch {
+    return null
+  }
 }
 
 function bindRoutePartition(
