@@ -62,8 +62,14 @@ export function appendMobileNativeChatPending(
       normalizeReconcileText(pending.text) === origin.normalizedText &&
       pending.expectedOccurrence > origin.baselineOccurrences
   ).length
+  // Same normalization on both sides again: the ordinal is SELECTED on
+  // `origin.normalizedText === ''`, so counting on a raw trim() skips an image
+  // whose caption is itself only markers and hands the next photo an ordinal
+  // already taken - which strands it, since each echo claims one message id.
   const expectedImageEchoOrdinal =
-    current.filter((pending) => pending.text.trim() === '' && pending.images?.length).length + 1
+    current.filter(
+      (pending) => normalizeReconcileText(pending.text) === '' && pending.images?.length
+    ).length + 1
   return {
     ...previous,
     [key]: [

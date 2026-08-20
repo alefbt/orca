@@ -114,13 +114,40 @@ describe('appendMobileNativeChatPending for sends the transcript cannot echo', (
     )
 
     expect(pending[KEY]).toBeUndefined()
-    expect(
-      retireLandedMobileNativeChatPending(
-        [...messages, userTurn('m2', '[Image #1]')],
-        pending[KEY] ?? [],
-        NO_IMAGE_ECHOES
-      )
-    ).toEqual([])
+  })
+
+  // The motivation for suppressing it at the source: had the echo been recorded,
+  // no later transcript could retire it. Built by hand, because append no longer
+  // produces one.
+  it('could never have retired such an echo once recorded', () => {
+    const stranded = [
+      {
+        id: 'p1',
+        text: '[Image #1]',
+        expectedOccurrence: 1,
+        baselineTailMessageId: 'm1',
+        baselineResolved: true
+      }
+    ]
+    const landed = [userTurn('m1', 'hi'), userTurn('m2', '[Image #1]')]
+
+    expect(retireLandedMobileNativeChatPending(landed, stranded, NO_IMAGE_ECHOES)).toEqual(stranded)
+  })
+
+  it('gives a caption-less photo its own ordinal after a marker-only caption', () => {
+    const first = appendMobileNativeChatPending(
+      {},
+      KEY,
+      'p1',
+      sendOrigin('[Image #1]', []),
+      '[Image #1]',
+      ['file:///a.jpg']
+    )
+    const both = appendMobileNativeChatPending(first, KEY, 'p2', sendOrigin('', []), '', [
+      'file:///b.jpg'
+    ])
+
+    expect(both[KEY]?.map((item) => item.expectedOccurrence)).toEqual([1, 2])
   })
 
   it('still records an image echo, whose text is empty by design', () => {
