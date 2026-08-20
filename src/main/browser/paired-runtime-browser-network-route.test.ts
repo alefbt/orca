@@ -476,6 +476,41 @@ describe('PairedRuntimeBrowserNetworkRoute', () => {
     await route.close()
   })
 
+  it('recovers again after a second transport death', async () => {
+    const attempts = mockSubscriptionAttempts()
+    const route = createRoute()
+    const starting = route.start()
+    await vi.waitFor(() => expect(attempts).toHaveLength(1))
+    ready(attempts[0]!, 7)
+    const address = await starting
+
+    attempts[0]!.callbacks.onClose?.()
+    await vi.waitFor(() => expect(attempts).toHaveLength(2))
+    ready(attempts[1]!, 8)
+    await vi.waitFor(() => expect(attempts[1]!.close).not.toHaveBeenCalled())
+
+    attempts[1]!.callbacks.onClose?.()
+    await vi.waitFor(() => expect(attempts).toHaveLength(3))
+    ready(attempts[2]!, 9)
+
+    const recovered = await connectSocks(address.host, address.port)
+    await greetSocks(recovered)
+    recovered.write(domainConnectRequest('twice-recovered.internal', 443))
+    await vi.waitFor(() => expect(openFrames(attempts[2]!)).toHaveLength(1))
+    attempts[2]!.callbacks.onBinary?.(
+      encodeBrowserNetworkTunnelFrame({
+        opcode: BrowserNetworkTunnelOpcode.Opened,
+        tunnelGeneration: 9,
+        streamId: 1,
+        payload: new Uint8Array()
+      })
+    )
+    expect(Array.from(await readExact(recovered, 10))).toEqual([5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
+
+    recovered.destroy()
+    await route.close()
+  })
+
   it('retries a failing rebuild and reports the terminal failure to the route owner', async () => {
     const attempts = mockSubscriptionAttempts()
     const onUnavailable = vi.fn()
