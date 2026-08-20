@@ -3,7 +3,7 @@ import {
   HeadlessPairedRuntimeStartupDiagnosticBuffer,
   formatHeadlessPairedRuntimeStartupDiagnostics,
   parseHeadlessPairedRuntimePairingOffer
-} from './headless-paired-runtime-host'
+} from './headless-paired-runtime-serve-readiness'
 
 describe('headless paired runtime startup diagnostics', () => {
   it('redacts pairing URLs before truncation can remove their prefix', () => {
