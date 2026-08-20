@@ -94,3 +94,29 @@ describe('countLeadingPendingTextsGluedToUserText', () => {
     expect(countLeadingPendingTextsGluedToUserText(['a', '', 'b'], 'ab')).toBe(0)
   })
 })
+
+describe('pending sends typed through an agent TUI', () => {
+  beforeEach(() => clearPendingSendCacheForTests())
+
+  // The chat send path writes Ctrl+U before the body to clear the TUI input
+  // line. When the agent takes that write as a paste the byte lands in the
+  // transcript row itself, and U+0015 is not whitespace: without stripping it
+  // the row can never match the echo it belongs to.
+  const COMPOSER_TEXT = 'summarize the failing test and propose a fix'
+
+  it('prunes the echo of a row carrying the clear byte', () => {
+    const pending = appendPendingSendCache(scope, {
+      id: 'p1',
+      text: COMPOSER_TEXT,
+      sentAt: 100,
+      afterMessageId: 'boundary'
+    })
+    const transcript = [
+      message('u1', 'user', `\u0015${COMPOSER_TEXT}`, 150),
+      message('a1', 'assistant', 'done', 160)
+    ]
+
+    expect(prunePendingSends(pending, transcript)).toEqual([])
+    expect(pendingSendsAsMessages(pending, transcript)).toEqual([])
+  })
+})

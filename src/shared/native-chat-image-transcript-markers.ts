@@ -1,3 +1,4 @@
+import { TERMINAL_CONTROL_CHARACTER_PATTERN } from './ansi-escape-sequences'
 import { isTextBlock, type NativeChatBlock, type NativeChatMessage } from './native-chat-types'
 
 const IMAGE_SOURCE_MARKER = /^\[Image:\s*source:\s*(.+?)\]\s*$/
@@ -36,8 +37,18 @@ export function stripImagePromptMarker(text: string): string {
   return result
 }
 
+/**
+ * Why the control strip: a chat send leads with Ctrl+U to clear the agent's TUI
+ * input line, and when the agent takes that write as a paste the byte becomes
+ * part of the prompt — Claude Code records the row as `\u0015<body>`. U+0015 is
+ * not whitespace, so trim() and /\s/ both leave it in place and a send can never
+ * equal its own transcript row. It comes off before the marker strip because a
+ * leading control byte also hides an `[Image #N]` from the start-of-text test.
+ */
 export function normalizeNativeChatUserText(text: string): string {
-  return stripImagePromptMarker(text).trim().replace(/\s+/g, ' ')
+  return stripImagePromptMarker(text.replace(TERMINAL_CONTROL_CHARACTER_PATTERN, ''))
+    .trim()
+    .replace(/\s+/g, ' ')
 }
 
 export function normalizedNativeChatUserMessageText(message: NativeChatMessage): string | null {

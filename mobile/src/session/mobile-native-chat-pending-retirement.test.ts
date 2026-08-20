@@ -321,3 +321,32 @@ describe('retireLandedMobileNativeChatPending', () => {
     expect(retireLandedMobileNativeChatPending(messages, pending, new Set(['p1']))).toEqual([])
   })
 })
+
+describe('retireLandedMobileNativeChatPending on a PTY-typed send', () => {
+  // Captured from a real Claude Code session JSONL on 2026-08-20, the day this
+  // was reported: a text-only mobile send bundles its Ctrl+U kill-line byte into
+  // the same terminal write as the body, the TUI takes the burst as a paste, and
+  // U+0015 lands in the transcript row. It is not whitespace, so it survives the
+  // reconcile normalizer and the echo used to pin at the tail forever.
+  const COMPOSER_TEXT =
+    'If this is an orca bug please spawn a new worktree and an agent to repro and fix it'
+  const TRANSCRIPT_ROW = `\u0015${COMPOSER_TEXT}`
+
+  it('retires the echo of a row the TUI pasted the Ctrl+U byte into', () => {
+    const messages = [
+      assistantTurn('m1', 'ready', 1000),
+      userTurn('m2', TRANSCRIPT_ROW, 5000),
+      assistantTurn('m3', 'on it', 6000)
+    ]
+    const pending = [pendingSend('p1', COMPOSER_TEXT, 'm1')]
+
+    expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual([])
+  })
+
+  it('still holds the echo when no row carries the text at all', () => {
+    const messages = [assistantTurn('m1', 'ready', 1000)]
+    const pending = [pendingSend('p1', COMPOSER_TEXT, 'm1')]
+
+    expect(retireLandedMobileNativeChatPending(messages, pending, NO_IMAGE_ECHOES)).toEqual(pending)
+  })
+})
