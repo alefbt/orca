@@ -56,10 +56,12 @@ function harness() {
   const executor = new BrowserClientPageCommandExecutor({
     orcaProfileId: 'profile-a',
     authorityConnectionIdentity: 'authority-a',
+    legacyAuthorityConnectionIdentity: 'legacy-authority-a',
     storageScope: 'a'.repeat(64),
     retainNetworkRoute: vi.fn(async () => ({
       key: 'execution-host-a',
       executionHostIdentity: 'execution-host-record-a',
+      legacyExecutionHostIdentity: 'legacy-execution-host-record-a',
       proxyEndpoint: { host: '127.0.0.1' as const, port: 43123 },
       release: vi.fn()
     })),

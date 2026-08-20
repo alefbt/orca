@@ -5,14 +5,11 @@ import type {
   BrowserClientHostLeaseAuthority
 } from '../../shared/browser-client-host-protocol'
 import type { BrowserClientPageNetworkRoute } from './browser-client-page-cleanup'
+import type { BrowserClientPageAuthorityIdentity as BrowserClientHostAuthorityTransitionInput } from './browser-client-page-command-executor-dependencies'
 import {
   type ComposedBrowserClientNetworkRoutes,
   PairedRuntimeBrowserClientHostRouteSets
 } from './paired-runtime-browser-client-host-route-sets'
-
-type BrowserClientHostAuthorityTransitionInput = {
-  authorityConnectionIdentity: string
-}
 
 type ComposedPageExecutor = {
   handle(
@@ -23,7 +20,7 @@ type ComposedPageExecutor = {
   hasUnresolvedPage(browserPageId: string, pageHostGeneration: number): boolean
   snapshotPageInventory(): readonly BrowserClientHostedPageInventory[]
   beginAuthorityTransition(): void
-  completeAuthorityTransition(authorityConnectionIdentity: string): void
+  completeAuthorityTransition(input: BrowserClientHostAuthorityTransitionInput): void
   fenceNavigation(): void
   close(): Promise<void>
 }
@@ -220,7 +217,7 @@ export class PairedRuntimeBrowserClientHostComposition<
     if (this.closed) {
       throw new Error('paired_runtime_browser_client_host_composition_closed')
     }
-    this.executor.completeAuthorityTransition(input.authorityConnectionIdentity)
+    this.executor.completeAuthorityTransition(input)
     const replacementHost = this.createHost(input, true)
     this.host = replacementHost
     return replacementHost.start()

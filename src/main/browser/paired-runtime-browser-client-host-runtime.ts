@@ -10,7 +10,10 @@ import {
   type KnownRuntimeEnvironment
 } from '../../shared/runtime-environments'
 import { BrowserClientNetworkRouteRegistry } from './browser-client-network-route-registry'
-import { browserNativeExecutionHostStorageIdentity } from './browser-execution-host-storage-identity'
+import {
+  browserAuthorityExecutionHostStorageIdentity,
+  legacyBrowserNativeExecutionHostStorageIdentity
+} from './browser-execution-host-storage-identity'
 import { deriveBrowserRoutePartitionStorageScope } from './browser-route-identity'
 import { BrowserClientDownloadRelay } from './browser-client-download-relay'
 import { registerBrowserClientDownloadRouter } from './browser-client-download-routing'
@@ -40,6 +43,9 @@ export type ClientHostRouteIdentity = {
   orcaProfileId: string
   authorityConnectionIdentity: string
   executionHostIdentity: string
+  /** Pre-migration pair, naming the partition an older build already populated. */
+  legacyAuthorityConnectionIdentity: string
+  legacyExecutionHostIdentity: string
   storageScope: string
 }
 
@@ -47,6 +53,7 @@ type ProductionBrowserClientHostStart = PairedRuntimeBrowserClientHostStart & {
   pairing: PairingOffer
   orcaProfileId: string
   authorityConnectionIdentity: string
+  legacyAuthorityConnectionIdentity: string
   storageScope: string
   environmentLabel: string
 }
@@ -80,11 +87,13 @@ const browserClientHosts =
       return new PairedRuntimeBrowserClientHostComposition({
         onClosing: releaseDownloadRouting,
         initialInput: input,
-        createRoutes: (next, authority) => createNetworkRoutes(next.pairing, authority),
+        createRoutes: (next, authority) =>
+          createNetworkRoutes(next.pairing, authority, next.storageScope),
         createExecutor: (next, { retainNetworkRoute, onPageUnavailable }) => {
           executor = new BrowserClientPageCommandExecutor({
             orcaProfileId: next.orcaProfileId,
             authorityConnectionIdentity: next.authorityConnectionIdentity,
+            legacyAuthorityConnectionIdentity: next.legacyAuthorityConnectionIdentity,
             storageScope: next.storageScope,
             retainNetworkRoute,
             selectRenderer: selectBrowserClientPageRenderer,
@@ -148,21 +157,31 @@ export async function startPairedRuntimeBrowserClientHost(options: {
   }
   const pairingRevision = options.environment.pairingRevision ?? options.environment.createdAt
   const pairing = getPreferredPairingOffer(options.environment)
+  const storageScope = deriveBrowserRoutePartitionStorageScope({
+    orcaProfileId,
+    environmentId: options.environment.id
+  })
   const routeIdentity: ClientHostRouteIdentity = {
     orcaProfileId,
-    storageScope: deriveBrowserRoutePartitionStorageScope({
-      orcaProfileId,
-      environmentId: options.environment.id
-    }),
+    storageScope,
     authorityConnectionIdentity: authorityConnectionIdentity(
+      orcaProfileId,
+      options.environment.id,
+      pairingRevision,
+      pairing
+    ),
+    // Why: settings-level operations target the server's own machine, not a nested SSH/WSL host.
+    executionHostIdentity: browserAuthorityExecutionHostStorageIdentity(storageScope),
+    legacyAuthorityConnectionIdentity: legacyAuthorityConnectionIdentity(
       orcaProfileId,
       options.environment.id,
       pairingRevision,
       options.authorityRuntimeId,
       pairing
     ),
-    // Why: settings-level operations target the server's own machine, not a nested SSH/WSL host.
-    executionHostIdentity: browserNativeExecutionHostStorageIdentity(options.authorityRuntimeId)
+    legacyExecutionHostIdentity: legacyBrowserNativeExecutionHostStorageIdentity(
+      options.authorityRuntimeId
+    )
   }
   const authority = await browserClientHosts.start({
     environmentId: options.environment.id,
@@ -172,7 +191,8 @@ export async function startPairedRuntimeBrowserClientHost(options: {
     orcaProfileId,
     storageScope: routeIdentity.storageScope,
     environmentLabel: options.environment.name,
-    authorityConnectionIdentity: routeIdentity.authorityConnectionIdentity
+    authorityConnectionIdentity: routeIdentity.authorityConnectionIdentity,
+    legacyAuthorityConnectionIdentity: routeIdentity.legacyAuthorityConnectionIdentity
   })
   clientHostRouteIdentities.set(options.environment.id, routeIdentity)
   return authority
@@ -216,10 +236,12 @@ export function shutdownPairedRuntimeBrowserClientHosts(): Promise<void> {
 
 function createNetworkRoutes(
   pairing: PairingOffer,
-  authority: BrowserClientHostLeaseAuthority
+  authority: BrowserClientHostLeaseAuthority,
+  authorityStorageKey: string
 ): BrowserClientNetworkRouteRegistry {
   return new BrowserClientNetworkRouteRegistry({
     authority,
+    authorityStorageKey,
     createRoute: (executionHost) =>
       new PairedRuntimeBrowserNetworkRoute({
         pairing,
@@ -231,27 +253,51 @@ function createNetworkRoutes(
   })
 }
 
+/**
+ * Storage identity of the connection to a paired server.
+ *
+ * Every component is a durable client-side record: the environment, its pairing
+ * revision, and the server's public key. The server's `authorityRuntimeId` is
+ * deliberately absent -- it is a per-process UUID, and hashing it here minted a
+ * fresh partition on every remote restart, dropping the user's cookies.
+ */
 function authorityConnectionIdentity(
+  orcaProfileId: string,
+  environmentId: string,
+  pairingRevision: number,
+  pairing: PairingOffer
+): string {
+  return connectionIdentityDigest([
+    'paired-runtime-browser',
+    orcaProfileId,
+    environmentId,
+    pairingRevision,
+    pairing.publicKeyB64,
+    pairing.pairedDeviceId ?? null
+  ])
+}
+
+/** Superseded per-process identity, kept only so its partition can be adopted. */
+function legacyAuthorityConnectionIdentity(
   orcaProfileId: string,
   environmentId: string,
   pairingRevision: number,
   authorityRuntimeId: string,
   pairing: PairingOffer
 ): string {
-  const digest = createHash('sha256')
-    .update(
-      JSON.stringify([
-        'paired-runtime-browser',
-        orcaProfileId,
-        environmentId,
-        pairingRevision,
-        authorityRuntimeId,
-        pairing.publicKeyB64,
-        pairing.pairedDeviceId ?? null
-      ])
-    )
-    .digest('hex')
-  return `paired-runtime:${digest}`
+  return connectionIdentityDigest([
+    'paired-runtime-browser',
+    orcaProfileId,
+    environmentId,
+    pairingRevision,
+    authorityRuntimeId,
+    pairing.publicKeyB64,
+    pairing.pairedDeviceId ?? null
+  ])
+}
+
+function connectionIdentityDigest(components: readonly unknown[]): string {
+  return `paired-runtime:${createHash('sha256').update(JSON.stringify(components)).digest('hex')}`
 }
 
 // Why: staged remote bytes are main-owned scratch, never the user's visible Downloads folder.

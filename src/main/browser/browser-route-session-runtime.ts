@@ -1,9 +1,11 @@
 import { session, webContents } from 'electron'
 import { setBrowserClientRouteWebContentsProbe } from './browser-client-download-routing'
+import type { BrowserRoutePartitionBindingStore } from './browser-route-partition-binding-store'
 import {
   configureBrowserRoutePartitionBindingsForOrcaProfile,
   currentBrowserRoutePartitionBindingStore
 } from './browser-route-partition-binding-runtime'
+import { releaseEvictedBrowserRoutePartitionStorage } from './browser-route-partition-storage-dependencies'
 import { isBrowserRouteGuestPopup } from './browser-route-guest-popup-ownership'
 import { browserManager } from './browser-manager'
 import { BrowserRouteSessionRegistry } from './browser-route-session-registry'
@@ -14,13 +16,21 @@ const routeWebContentsRegistryRef: {
   current: BrowserRouteWebContentsRegistry | null
 } = { current: null }
 
+// Why: a retained partition's storage is in use right now, so eviction must never pick it.
+const currentBindingStore = (): BrowserRoutePartitionBindingStore =>
+  currentBrowserRoutePartitionBindingStore({
+    isPartitionRetained: (partition) => browserRouteSessionRegistry.isPartitionRetained(partition)
+  })
+
 const bindingStore = {
-  get(partition: string): string | null {
-    return currentBrowserRoutePartitionBindingStore().get(partition)
-  },
-  set(partition: string, fingerprint: string, storageScope: string): void {
-    currentBrowserRoutePartitionBindingStore().set(partition, fingerprint, storageScope)
-  }
+  get: (partition: string): string | null => currentBindingStore().get(partition),
+  set: (partition: string, fingerprint: string, storageScope: string): readonly string[] =>
+    currentBindingStore().set(partition, fingerprint, storageScope),
+  touch: (partition: string): void => currentBindingStore().touch(partition),
+  findPartitionByFingerprint: (fingerprint: string): string | null =>
+    currentBindingStore().findPartitionByFingerprint(fingerprint),
+  rebind: (partition: string, fingerprint: string, storageScope: string): void =>
+    currentBindingStore().rebind(partition, fingerprint, storageScope)
 }
 
 export const browserRouteSessionRegistry = new BrowserRouteSessionRegistry({
@@ -36,7 +46,12 @@ export const browserRouteSessionRegistry = new BrowserRouteSessionRegistry({
   },
   retirePageAuthority: (retirement) =>
     routeWebContentsRegistryRef.current?.retirePageAuthority(retirement) ?? false,
-  bindingStore
+  bindingStore,
+  releaseEvictedPartitions: (partitions) => {
+    void releaseEvictedBrowserRoutePartitionStorage(partitions, (partition) =>
+      browserRouteSessionRegistry.isPartitionRetained(partition)
+    )
+  }
 })
 
 export const browserRouteWebContentsRegistry = new BrowserRouteWebContentsRegistry({

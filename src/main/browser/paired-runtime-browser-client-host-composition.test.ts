@@ -23,8 +23,14 @@ const replacementAuthority: BrowserClientHostLeaseAuthority = {
   pageReconciliationProtocolVersion: 1
 }
 
-const initialInput = { authorityConnectionIdentity: 'authority-record-a' }
-const replacementInput = { authorityConnectionIdentity: 'authority-record-b' }
+const initialInput = {
+  authorityConnectionIdentity: 'authority-record-a',
+  legacyAuthorityConnectionIdentity: 'legacy-authority-record-a'
+}
+const replacementInput = {
+  authorityConnectionIdentity: 'authority-record-b',
+  legacyAuthorityConnectionIdentity: 'legacy-authority-record-b'
+}
 
 describe('PairedRuntimeBrowserClientHostComposition', () => {
   it('activates exact route authority before admitting page commands', async () => {

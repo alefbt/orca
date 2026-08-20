@@ -10,6 +10,7 @@ const authority: BrowserHostLeaseAuthority = {
   browserHostClientId: 'client-a',
   browserHostGeneration: 2
 }
+const authorityStorageKey = 'a'.repeat(64)
 
 afterEach(() => {
   vi.useRealTimers()
@@ -21,6 +22,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const routeFactory = vi.fn(() => route)
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: routeFactory
     })
     const key = browserNetworkExecutionHostKey({
@@ -37,11 +39,10 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     expect(route.reconnect).toHaveBeenCalledOnce()
     expect(first).toMatchObject({
       key,
-      executionHostIdentity: browserNetworkExecutionHostStorageIdentity({
-        kind: 'native',
-        runtimeId: 'runtime-a',
-        revision: 7
-      }),
+      executionHostIdentity: browserNetworkExecutionHostStorageIdentity(
+        { kind: 'native', runtimeId: 'runtime-a', revision: 7 },
+        authorityStorageKey
+      ),
       proxyEndpoint: { host: '127.0.0.1', port: 43123 }
     })
     expect(first.executionHostIdentity).not.toBe(key)
@@ -66,7 +67,11 @@ describe('BrowserClientNetworkRouteRegistry', () => {
       return { host: '127.0.0.1', port: 43123 }
     })
     const routeFactory = vi.fn(() => route)
-    const registry = new BrowserClientNetworkRouteRegistry({ authority, createRoute: routeFactory })
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: routeFactory
+    })
     const key = browserNetworkExecutionHostKey({
       kind: 'native',
       runtimeId: 'runtime-a',
@@ -86,6 +91,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const routeFactory = vi.fn(() => createRoute())
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: routeFactory
     })
     const key = browserNetworkExecutionHostKey({
@@ -118,6 +124,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     )
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: () => route
     })
     const controller = new AbortController()
@@ -138,6 +145,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const routeFactory = vi.fn().mockReturnValueOnce(firstRoute).mockReturnValueOnce(secondRoute)
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: routeFactory
     })
     await registry.retain(
@@ -170,6 +178,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const route = createRoute()
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: () => route
     })
     const key = browserNetworkExecutionHostKey({
@@ -200,6 +209,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const route = createRoute()
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: () => route
     })
     await registry.retain(
@@ -217,6 +227,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const route = createRoute()
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: () => route
     })
     const key = browserNetworkExecutionHostKey({
@@ -249,6 +260,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const healthy = createRoute()
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       reconnectGraceMs: 1_000,
       reconnectRetryDelayMs: 10,
       createRoute: vi.fn().mockReturnValueOnce(flaky).mockReturnValueOnce(healthy)
@@ -290,6 +302,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     )
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: () => route
     })
     await registry.retain(
@@ -315,6 +328,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     const healthy = createRoute()
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       reconnectGraceMs: 25,
       reconnectRetryDelayMs: 10,
       createRoute: vi.fn().mockReturnValueOnce(flaky).mockReturnValueOnce(healthy)

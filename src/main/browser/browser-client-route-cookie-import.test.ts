@@ -10,7 +10,13 @@ const {
   selectBrowserProfileMock,
   updateProfileSourceMock
 } = vi.hoisted(() => ({
-  bindingStore: { get: vi.fn(() => null as string | null), set: vi.fn() },
+  bindingStore: {
+    get: vi.fn(() => null as string | null),
+    set: vi.fn(() => [] as readonly string[]),
+    touch: vi.fn(),
+    findPartitionByFingerprint: vi.fn(() => null as string | null),
+    rebind: vi.fn()
+  },
   detectInstalledBrowsersMock: vi.fn(),
   getProfileMock: vi.fn(),
   getRouteIdentityMock: vi.fn(),
@@ -46,6 +52,8 @@ const routeIdentity = {
   orcaProfileId: 'orca-profile-a',
   authorityConnectionIdentity: 'paired-runtime:authority-a',
   executionHostIdentity: 'execution-host-a',
+  legacyAuthorityConnectionIdentity: 'paired-runtime:legacy-authority-a',
+  legacyExecutionHostIdentity: 'legacy-execution-host-a',
   storageScope: 'e'.repeat(64)
 }
 

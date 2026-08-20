@@ -6,7 +6,7 @@ import {
   type DetectedBrowser
 } from './browser-cookie-import'
 import { currentBrowserRoutePartitionBindingStore } from './browser-route-partition-binding-runtime'
-import { deriveBrowserRoutePartition } from './browser-route-identity'
+import { resolveBrowserRoutePartitionBinding } from './browser-route-partition-migration'
 import { browserSessionRegistry } from './browser-session-registry'
 import { getPairedRuntimeBrowserClientRouteIdentity } from './paired-runtime-browser-client-host-runtime'
 
@@ -63,13 +63,23 @@ function bindRoutePartition(
   browserProfileId: string
 ): string {
   browserSessionRegistry.requireRouteBrowserProfile(browserProfileId)
-  const derived = deriveBrowserRoutePartition({
-    orcaProfileId: routeIdentity.orcaProfileId,
-    browserProfileId,
-    authorityConnectionIdentity: routeIdentity.authorityConnectionIdentity,
-    executionHostIdentity: routeIdentity.executionHostIdentity
-  })
   const bindings = currentBrowserRoutePartitionBindingStore()
+  const derived = resolveBrowserRoutePartitionBinding({
+    bindings,
+    identity: {
+      orcaProfileId: routeIdentity.orcaProfileId,
+      browserProfileId,
+      authorityConnectionIdentity: routeIdentity.authorityConnectionIdentity,
+      executionHostIdentity: routeIdentity.executionHostIdentity
+    },
+    legacyIdentity: {
+      orcaProfileId: routeIdentity.orcaProfileId,
+      browserProfileId,
+      authorityConnectionIdentity: routeIdentity.legacyAuthorityConnectionIdentity,
+      executionHostIdentity: routeIdentity.legacyExecutionHostIdentity
+    },
+    storageScope: routeIdentity.storageScope
+  })
   const persisted = bindings.get(derived.partition)
   if (persisted === null) {
     bindings.set(derived.partition, derived.bindingFingerprint, routeIdentity.storageScope)

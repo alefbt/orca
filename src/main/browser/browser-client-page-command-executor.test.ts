@@ -48,6 +48,12 @@ describe('BrowserClientPageCommandExecutor', () => {
         authorityConnectionIdentity: 'authority-record-a',
         executionHostIdentity: 'execution-host-record-a'
       },
+      legacyIdentity: {
+        orcaProfileId: 'orca-profile-a',
+        browserProfileId: 'profile-a',
+        authorityConnectionIdentity: 'legacy-authority-record-a',
+        executionHostIdentity: 'legacy-execution-host-record-a'
+      },
       storageScope: 'a'.repeat(64),
       browserPageId: 'page-a',
       pageHostGeneration: 7,

@@ -1,5 +1,4 @@
-import { app, session } from 'electron'
-import { rm } from 'node:fs/promises'
+import { app } from 'electron'
 import { listEnvironments } from '../../shared/runtime-environment-store'
 import { deriveBrowserRoutePartitionStorageScope } from './browser-route-identity'
 import {
@@ -8,13 +7,9 @@ import {
   releaseBrowserRoutePartitionStorage,
   type BrowserRoutePartitionStorageDependencies
 } from './browser-route-partition-storage-lifecycle'
-import {
-  activeBrowserRoutePartitionOrcaProfileId,
-  currentBrowserRoutePartitionBindingStore,
-  routePartitionDataRoot
-} from './browser-route-partition-binding-runtime'
+import { activeBrowserRoutePartitionOrcaProfileId } from './browser-route-partition-binding-runtime'
+import { browserRoutePartitionStorageDependencies } from './browser-route-partition-storage-dependencies'
 import { browserRouteSessionRegistry } from './browser-route-session-runtime'
-import { browserSessionRegistry } from './browser-session-registry'
 
 export type BrowserRoutePartitionStorageClear = {
   clearedPartitions: string[]
@@ -74,19 +69,9 @@ export async function clearBrowserRoutePartitionStorageForEnvironment(
 }
 
 function storageDependencies(): BrowserRoutePartitionStorageDependencies {
-  return {
-    bindings: currentBrowserRoutePartitionBindingStore(),
-    partitionDataRoot: routePartitionDataRoot(),
-    isPartitionLive: (partition) => browserRouteSessionRegistry.isPartitionRetained(partition),
-    clearPartitionStorage: async (partition) => {
-      const partitionSession = session.fromPartition(partition)
-      await partitionSession.clearStorageData()
-      await partitionSession.clearCache()
-      browserSessionRegistry.clearRoutePartitionPolicies(partition)
-    },
-    // Why: force ignores an already-absent directory, keeping the sweep idempotent.
-    removePartitionDirectory: (directory) => rm(directory, { recursive: true, force: true })
-  }
+  return browserRoutePartitionStorageDependencies((partition) =>
+    browserRouteSessionRegistry.isPartitionRetained(partition)
+  )
 }
 
 function reportStorageFailures(stage: string, failures: readonly unknown[]): void {

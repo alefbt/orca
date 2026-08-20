@@ -8,7 +8,11 @@ import {
   sameBrowserClientNetworkRouteAddress
 } from './browser-client-network-route-address'
 import { reconnectBrowserClientNetworkRoutes } from './browser-client-network-route-recovery'
-import { browserNetworkExecutionHostStorageIdentity } from './browser-execution-host-storage-identity'
+import {
+  browserNetworkExecutionHostStorageIdentity,
+  legacyBrowserNetworkExecutionHostStorageIdentity
+} from './browser-execution-host-storage-identity'
+import { createRouteRetirement, waitForRoute } from './browser-client-network-route-settlement'
 import { resolveBrowserHostReconnectDelay } from './browser-host-lease-reconnect-delay'
 import { parseBrowserNetworkExecutionHostKey } from './browser-network-execution-route'
 
@@ -21,6 +25,8 @@ type BrowserClientNetworkRoute = {
 
 type BrowserClientNetworkRouteRegistryOptions = {
   authority: BrowserHostLeaseAuthority
+  /** Durable name for the authority's machine; its runtimeId is per-process and must not reach storage. */
+  authorityStorageKey: string
   reconnectGraceMs?: number
   reconnectRetryDelayMs?: number
   createRoute(
@@ -91,7 +97,12 @@ export class BrowserClientNetworkRouteRegistry {
       return {
         key,
         // Why: the route key fences per-boot generations; storage must outlive them.
-        executionHostIdentity: browserNetworkExecutionHostStorageIdentity(executionHost),
+        executionHostIdentity: browserNetworkExecutionHostStorageIdentity(
+          executionHost,
+          this.options.authorityStorageKey
+        ),
+        legacyExecutionHostIdentity:
+          legacyBrowserNetworkExecutionHostStorageIdentity(executionHost),
         proxyEndpoint: { host: '127.0.0.1', port: address.port },
         release: async () => {
           if (released) {
@@ -279,39 +290,4 @@ export class BrowserClientNetworkRouteRegistry {
       this.retirement.resolve()
     }
   }
-}
-
-function createRouteRetirement(): {
-  promise: Promise<void>
-  resolve: () => void
-  reject: (error: unknown) => void
-} {
-  let resolve = (): void => {}
-  let reject = (_error: unknown): void => {}
-  const promise = new Promise<void>((innerResolve, innerReject) => {
-    resolve = innerResolve
-    reject = innerReject
-  })
-  void promise.catch(() => undefined)
-  return { promise, resolve, reject }
-}
-
-function waitForRoute<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(new Error('browser_client_network_route_aborted'))
-  }
-  return new Promise((resolve, reject) => {
-    const abort = (): void => reject(new Error('browser_client_network_route_aborted'))
-    signal.addEventListener('abort', abort, { once: true })
-    void work.then(
-      (value) => {
-        signal.removeEventListener('abort', abort)
-        resolve(value)
-      },
-      (error) => {
-        signal.removeEventListener('abort', abort)
-        reject(error)
-      }
-    )
-  })
 }
