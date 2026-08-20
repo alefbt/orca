@@ -137,6 +137,34 @@ describe('executeBrowserClientUploadCommand', () => {
     expect(await readdir(stagingRoot)).toHaveLength(0)
   })
 
+  it('reports the upload failure, not the cleanup failure, when both fail', async () => {
+    const staging = new BrowserClientUploadStaging(stagingRoot, {
+      mkdir: async () => {},
+      writeFile: async () => {},
+      removeDirectorySync: () => {},
+      removeDirectory: async () => {
+        throw new Error('EBUSY: resource busy or locked')
+      }
+    })
+    const { transport } = transportReturning(
+      new Map([['a.txt', [{ contentBase64: '', bytesRead: 0, eof: true }]]])
+    )
+
+    await expect(
+      executeBrowserClientUploadCommand({
+        event: uploadEvent(['a.txt']),
+        params: { element: '#f', files: ['a.txt'] },
+        fileChannel: transport,
+        staging,
+        run: async () => {
+          throw new Error('element not found')
+        }
+      })
+    ).rejects.toThrow('element not found')
+    // Why: the retained record is the only handle a later page release has on the directory.
+    expect(staging.activeStagingCount()).toBe(1)
+  })
+
   it('rejects a params payload whose files are not remote path strings', async () => {
     const staging = new BrowserClientUploadStaging(stagingRoot)
     const { transport } = transportReturning(new Map())
