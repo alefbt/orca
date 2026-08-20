@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentBrowserBridge } from '../browser/agent-browser-bridge'
 import { REMOTE_RUNTIME_MAX_OUTBOUND_BINARY_FRAME_BYTES } from '../../shared/remote-runtime-memory-limits'
-import type { RuntimeBrowserCommandHost } from './orca-runtime-browser'
+import { BROWSER_SCREENCAST_GHOST_SUBSCRIBER_REFUSAL_LIMIT } from './browser-screencast-ghost-subscriber-eviction'
+import type { RuntimeBrowserCommandHost, RuntimeBrowserCommands } from './orca-runtime-browser'
 import { RuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 
 const { webContentsFromId, startBrowserScreencast } = vi.hoisted(() => ({
@@ -283,5 +284,249 @@ describe('RuntimeBrowserCommands screencast fanout', () => {
     expect(sendBinary).toHaveBeenCalledOnce()
     started.session.stop()
     await started.session.done
+  })
+})
+
+describe('RuntimeBrowserCommands screencast ghost eviction', () => {
+  beforeEach(() => {
+    webContentsFromId.mockReset()
+    webContentsFromId.mockReturnValue({ isDestroyed: () => false })
+    startBrowserScreencast.mockReset()
+  })
+
+  type Subscription = Awaited<ReturnType<RuntimeBrowserCommands['browserScreencast']>>
+
+  function pumpFrames(count: number): void {
+    const onFrame = startBrowserScreencast.mock.calls[0][1].onFrame
+    for (let index = 0; index < count; index += 1) {
+      onFrame(new Uint8Array([index & 0xff]))
+    }
+  }
+
+  // A viewer that received frames and then vanished: the E2EE channel refuses permanently once
+  // its socket leaves OPEN, which is exactly what a force-quit client leaves behind.
+  function sendUntilQuit(framesBeforeQuit: number) {
+    let sent = 0
+    return vi.fn((_bytes: Uint8Array<ArrayBufferLike>) => sent++ < framesBeforeQuit)
+  }
+
+  it('evicts a departed subscriber and hands its viewport to the survivor', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    const updateViewport = vi.fn(async () => {})
+    startBrowserScreencast.mockResolvedValue({ stop, done: done.promise, updateViewport })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const survivorSend = vi.fn(() => true)
+    const survivor: Subscription = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 1200,
+        viewportHeight: 800
+      },
+      { sendBinary: survivorSend }
+    )
+    const ghostSend = sendUntilQuit(1)
+    const ghost: Subscription = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 800,
+        viewportHeight: 600
+      },
+      { sendBinary: ghostSend }
+    )
+    updateViewport.mockClear()
+
+    pumpFrames(BROWSER_SCREENCAST_GHOST_SUBSCRIBER_REFUSAL_LIMIT)
+    expect(stop).not.toHaveBeenCalled()
+    expect(updateViewport).not.toHaveBeenCalled()
+
+    pumpFrames(1)
+    await ghost.session.done
+    // Why: eviction has to unwind through the same leave path an explicit stop uses — the ghost
+    // owned the viewport, so the survivor's dimensions are restored on the shared stream.
+    expect(updateViewport).toHaveBeenCalledWith(
+      expect.objectContaining({ viewportWidth: 1200, viewportHeight: 800 })
+    )
+    expect(stop).not.toHaveBeenCalled()
+
+    const ghostSends = ghostSend.mock.calls.length
+    const survivorSends = survivorSend.mock.calls.length
+    pumpFrames(10)
+    expect(ghostSend).toHaveBeenCalledTimes(ghostSends)
+    expect(survivorSend).toHaveBeenCalledTimes(survivorSends + 10)
+
+    survivor.session.stop()
+    await survivor.session.done
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('stops the shared stream when the evicted subscriber was the last one', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    startBrowserScreencast.mockResolvedValue({
+      stop,
+      done: done.promise,
+      updateViewport: vi.fn(async () => {})
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const only: Subscription = await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      { sendBinary: sendUntilQuit(1) }
+    )
+
+    pumpFrames(BROWSER_SCREENCAST_GHOST_SUBSCRIBER_REFUSAL_LIMIT + 1)
+    await only.session.done
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a subscriber whose refusals are broken by a delivery', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    startBrowserScreencast.mockResolvedValue({
+      stop,
+      done: done.promise,
+      updateViewport: vi.fn(async () => {})
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    let sends = 0
+    // Why: this is the backpressure shape — a link that drains one frame per window must never
+    // be mistaken for a socket that is gone.
+    const backpressured: Subscription = await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      {
+        sendBinary: vi.fn(() => sends++ % BROWSER_SCREENCAST_GHOST_SUBSCRIBER_REFUSAL_LIMIT === 0)
+      }
+    )
+
+    pumpFrames(BROWSER_SCREENCAST_GHOST_SUBSCRIBER_REFUSAL_LIMIT * 5)
+    expect(stop).not.toHaveBeenCalled()
+
+    backpressured.session.stop()
+    await backpressured.session.done
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('never evicts on the refusals a joiner pre-ready gate produced', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    startBrowserScreencast.mockResolvedValue({
+      stop,
+      done: done.promise,
+      updateViewport: vi.fn(async () => {})
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    let gateOpen = false
+    const joinerSend = vi.fn(() => gateOpen)
+    const joiner: Subscription = await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      { sendBinary: joinerSend }
+    )
+
+    // A slow ready gate refuses far past the limit, and none of it is evidence about the viewer.
+    pumpFrames(BROWSER_SCREENCAST_GHOST_SUBSCRIBER_REFUSAL_LIMIT * 3)
+    expect(stop).not.toHaveBeenCalled()
+
+    gateOpen = true
+    joiner.flushPendingFrame()
+    gateOpen = false
+    // The replay landed, so the eviction clock starts here rather than carrying the gate's streak.
+    pumpFrames(BROWSER_SCREENCAST_GHOST_SUBSCRIBER_REFUSAL_LIMIT - 1)
+    expect(stop).not.toHaveBeenCalled()
+    pumpFrames(1)
+    await joiner.session.done
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('replaces the older subscription when the same paired device reattaches', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    const updateViewport = vi.fn(async () => {})
+    startBrowserScreencast.mockResolvedValue({ stop, done: done.promise, updateViewport })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const ghostSend = vi.fn(() => true)
+    const ghost: Subscription = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 1200,
+        viewportHeight: 800
+      },
+      { sendBinary: ghostSend, pairedDeviceId: 'device-a' }
+    )
+    const otherSend = vi.fn(() => true)
+    await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      { sendBinary: otherSend, pairedDeviceId: 'device-b' }
+    )
+    const reattachSend = vi.fn(() => true)
+    await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 900,
+        viewportHeight: 700
+      },
+      { sendBinary: reattachSend, pairedDeviceId: 'device-a' }
+    )
+
+    // Why: the reconnect arrives on a fresh socket, so the connection-keyed replacement upstream
+    // cannot see the abandoned subscription — the device identity is what closes it.
+    await ghost.session.done
+    expect(stop).not.toHaveBeenCalled()
+
+    pumpFrames(1)
+    expect(ghostSend).not.toHaveBeenCalled()
+    expect(reattachSend).toHaveBeenCalledOnce()
+    expect(otherSend).toHaveBeenCalledOnce()
+    // The replacement inherits viewport authority rather than leaving it with the evicted stream.
+    expect(updateViewport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ viewportWidth: 900, viewportHeight: 700 })
+    )
+  })
+
+  it('leaves other devices and unidentified callers attached', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    startBrowserScreencast.mockResolvedValue({
+      stop,
+      done: done.promise,
+      updateViewport: vi.fn(async () => {})
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const anonymousFirst = vi.fn(() => true)
+    const anonymousSecond = vi.fn(() => true)
+    const identified = vi.fn(() => true)
+    await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      { sendBinary: anonymousFirst }
+    )
+    await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      { sendBinary: anonymousSecond }
+    )
+    await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      { sendBinary: identified, pairedDeviceId: 'device-a' }
+    )
+
+    pumpFrames(1)
+    // Why: an absent pairedDeviceId is not an identity, so two unidentified callers must not
+    // collapse into one another the way two subscriptions from one device do.
+    expect(anonymousFirst).toHaveBeenCalledOnce()
+    expect(anonymousSecond).toHaveBeenCalledOnce()
+    expect(identified).toHaveBeenCalledOnce()
+    expect(stop).not.toHaveBeenCalled()
   })
 })

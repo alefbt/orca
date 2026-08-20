@@ -38223,6 +38223,7 @@ export class OrcaRuntimeService {
     params: Parameters<RuntimeBrowserCommands['browserScreencast']>[0],
     options: {
       connectionId?: string
+      pairedDeviceId?: string
       sendBinary?: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
       signal?: AbortSignal
       emit: (result: BrowserScreencastResult) => void
@@ -38297,7 +38298,8 @@ export class OrcaRuntimeService {
     try {
       screencast = await this.browserCommands.browserScreencast(params, {
         sendBinary: sendBinaryAfterReady,
-        emit: options.emit
+        emit: options.emit,
+        pairedDeviceId: options.pairedDeviceId
       })
       if (cancelledBeforeStart || options.signal?.aborted) {
         end(false)

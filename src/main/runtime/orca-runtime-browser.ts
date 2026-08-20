@@ -83,6 +83,12 @@ import {
 } from '../ipc/browser-tab-registration-wait'
 import { sendRemoteBrowserScreencastFrame } from './remote-browser-screencast-frame-admission'
 import {
+  INITIAL_SCREENCAST_SUBSCRIBER_DELIVERY,
+  recordScreencastSubscriberSend,
+  screencastSubscriberIsGhost,
+  type ScreencastSubscriberDeliveryState
+} from './browser-screencast-ghost-subscriber-eviction'
+import {
   browserTabCreateClientPageStartsActive,
   publishCreatedBrowserSessionTab
 } from './browser-tab-create-publication'
@@ -143,6 +149,10 @@ type ActiveBrowserScreencastSubscriber = {
   viewport: BrowserScreencastViewport
   budget: BrowserScreencastFrameBudget
   pendingFrame: Uint8Array<ArrayBufferLike> | null
+  // Why: identifies the viewer across reconnects, which the RPC connectionId cannot — a new
+  // socket never reuses the old id, so a reconnecting device would stack a second subscription.
+  pairedDeviceId?: string
+  delivery: ScreencastSubscriberDeliveryState
 }
 
 type ActiveBrowserScreencastPage = {
@@ -553,11 +563,44 @@ export class RuntimeBrowserCommands {
     )
   }
 
+  // The single leave path: an explicit stop, a ghost eviction and a same-device replacement all
+  // unwind through here, so viewport hand-off, budget release and stream teardown cannot drift.
+  private leaveScreencastSubscriber(
+    active: ActiveBrowserScreencastPage,
+    subscriptionId: string,
+    session: BrowserScreencastSession
+  ): void {
+    const subscriber = active.subscribers.get(subscriptionId)
+    if (!subscriber) {
+      return
+    }
+    active.subscribers.delete(subscriptionId)
+    subscriber.resolveDone()
+    if (active.viewportOwnerSubscriptionId === subscriptionId) {
+      const fallback = Array.from(active.subscribers.entries()).findLast(([, candidate]) =>
+        hasScreencastViewportSize(candidate.viewport)
+      )
+      active.viewportOwnerSubscriptionId = fallback?.[0] ?? null
+      if (fallback) {
+        void session.updateViewport(fallback[1].viewport).catch(() => {})
+      }
+    }
+    if (active.subscribers.size === 0) {
+      active.stopping = true
+      session.stop()
+      return
+    }
+    // Why: a departed subscriber's caps would otherwise pin the shared stream for
+    // the rest of its life, long after the client that asked for them is gone.
+    void applySharedScreencastFrameBudget(active, session).catch(() => {})
+  }
+
   async browserScreencast(
     params: BrowserScreencastParams,
     stream: {
       sendBinary: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void
       emit?: (event: BrowserScreencastResult) => void
+      pairedDeviceId?: string
     }
   ): Promise<BrowserScreencastStartResult> {
     if (await this.resolveClientHostedBrowserPage(params)) {
@@ -600,12 +643,23 @@ export class RuntimeBrowserCommands {
         ...budget,
         ...viewport,
         onFrame: (bytes) => {
-          for (const subscriber of record.subscribers.values()) {
+          const ghosts: string[] = []
+          for (const [subscriptionId, subscriber] of record.subscribers) {
             // A slow viewer drops this frame without stalling every other viewer, but the
             // newest refusal is retained so a gate that opens later can still be filled.
-            subscriber.pendingFrame = sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
-              ? null
-              : bytes
+            const delivered = sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
+            subscriber.pendingFrame = delivered ? null : bytes
+            subscriber.delivery = recordScreencastSubscriberSend(subscriber.delivery, delivered)
+            if (screencastSubscriberIsGhost(subscriber.delivery)) {
+              ghosts.push(subscriptionId)
+            }
+          }
+          // Evicting after the fan-out keeps a teardown that stops the session from cutting the
+          // remaining viewers out of this frame.
+          for (const subscriptionId of ghosts) {
+            if (record.session) {
+              this.leaveScreencastSubscriber(record, subscriptionId, record.session)
+            }
           }
           return true
         },
@@ -645,7 +699,9 @@ export class RuntimeBrowserCommands {
       resolveDone: resolveSubscriberDone,
       viewport,
       budget,
-      pendingFrame: null
+      pendingFrame: null,
+      pairedDeviceId: stream.pairedDeviceId,
+      delivery: INITIAL_SCREENCAST_SUBSCRIBER_DELIVERY
     })
     // Why: normalizeScreencastViewport keeps undefined dimensions, so a sizeless
     // subscriber taking ownership would clear the emulation for every viewer.
@@ -659,6 +715,17 @@ export class RuntimeBrowserCommands {
       active.subscribers.delete(subscriptionId)
       resolveSubscriberDone()
       throw error
+    }
+    // Why: a device that force-quit and reconnected arrives on a fresh socket, so the
+    // connection-keyed replacement upstream cannot see its old subscription. Run this after the
+    // joiner is registered — the page then never empties mid-replacement and stops the stream.
+    if (stream.pairedDeviceId !== undefined) {
+      // Deleting the entry being visited is well defined for a Map, and no other entry is touched.
+      for (const [candidateId, candidate] of active.subscribers) {
+        if (candidateId !== subscriptionId && candidate.pairedDeviceId === stream.pairedDeviceId) {
+          this.leaveScreencastSubscriber(active, candidateId, session)
+        }
+      }
     }
     if (!createdPageStream) {
       if (active.viewportOwnerSubscriptionId === subscriptionId) {
@@ -674,37 +741,15 @@ export class RuntimeBrowserCommands {
         if (!subscriber || !bytes) {
           return
         }
-        subscriber.pendingFrame = sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
-          ? null
-          : bytes
+        const delivered = sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
+        subscriber.pendingFrame = delivered ? null : bytes
+        // The replay is this subscriber's first chance to reach its socket, so it is also where
+        // an eviction-eligible delivery history starts.
+        subscriber.delivery = recordScreencastSubscriberSend(subscriber.delivery, delivered)
       },
       session: {
         done: subscriberDone,
-        stop: () => {
-          const subscriber = active.subscribers.get(subscriptionId)
-          if (!subscriber) {
-            return
-          }
-          active.subscribers.delete(subscriptionId)
-          subscriber.resolveDone()
-          if (active.viewportOwnerSubscriptionId === subscriptionId) {
-            const fallback = Array.from(active.subscribers.entries()).findLast(([, candidate]) =>
-              hasScreencastViewportSize(candidate.viewport)
-            )
-            active.viewportOwnerSubscriptionId = fallback?.[0] ?? null
-            if (fallback) {
-              void session.updateViewport(fallback[1].viewport).catch(() => {})
-            }
-          }
-          if (active.subscribers.size === 0) {
-            active.stopping = true
-            session.stop()
-            return
-          }
-          // Why: a departed subscriber's caps would otherwise pin the shared stream for
-          // the rest of its life, long after the client that asked for them is gone.
-          void applySharedScreencastFrameBudget(active, session).catch(() => {})
-        },
+        stop: () => this.leaveScreencastSubscriber(active, subscriptionId, session),
         updateViewport: session.updateViewport
       },
       ready: {
