@@ -3,10 +3,12 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
 import { BrowserNavigationControlRow } from '../assemble-chrome/browser-navigation-control-row'
+import { RemoteRuntimeEgressIndicator } from '../assemble-chrome/browser-egress-indicator'
 import { MarkupDrawButton } from '../annotate/MarkupDrawButton'
 import type { MarkupModeController } from '../annotate/useMarkupMode'
 
 export function RemoteBrowserPageToolbar({
+  runtimeEnvironmentId,
   addressBarValue,
   onAddressBarChange,
   onSubmitAddressBar,
@@ -21,6 +23,7 @@ export function RemoteBrowserPageToolbar({
   onForward,
   onReload
 }: {
+  runtimeEnvironmentId: string
   addressBarValue: string
   onAddressBarChange: (value: string) => void
   onSubmitAddressBar: () => void
@@ -52,6 +55,12 @@ export function RemoteBrowserPageToolbar({
       onAddressBarChange={onAddressBarChange}
       onSubmitAddressBar={onSubmitAddressBar}
       addressBarInputRef={addressBarInputRef}
+      addressBarLeadingIcon={
+        <RemoteRuntimeEgressIndicator
+          runtimeEnvironmentId={runtimeEnvironmentId}
+          presentation="streamed"
+        />
+      }
       reloadControl={
         // Why: no ignore-cache RPC exists for remote pages, and this pane binds no reload chord, so there is
         // nothing truthful to put in a menu or a shortcut hint here — tooltip only.

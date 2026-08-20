@@ -14,6 +14,7 @@ import type {
   BrowserDownloadFinishedEvent,
   BrowserDownloadRequestedEvent
 } from '../../../../shared/browser-guest-events'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { ClientHostedBrowserPagePane } from './ClientHostedBrowserPagePane'
 
 type Listeners = {
@@ -57,29 +58,31 @@ afterEach(() => {
 
 function renderPane(browserPageId = 'page-a'): void {
   render(
-    <ClientHostedBrowserPagePane
-      browserTab={
-        {
-          id: browserPageId,
-          url: 'https://example.internal/reports',
-          title: 'Reports',
-          loading: false,
-          canGoBack: false,
-          canGoForward: false
-        } as never
-      }
-      runtimeEnvironmentId="environment-a"
-      worktreeId="worktree-a"
-      placement={{
-        kind: 'client',
-        browserHostClientId: 'client-a',
-        browserHostGeneration: 3,
-        pageHostGeneration: 7
-      }}
-      isActive
-      onUpdatePageState={vi.fn()}
-      onSetUrl={vi.fn()}
-    />
+    <TooltipProvider>
+      <ClientHostedBrowserPagePane
+        browserTab={
+          {
+            id: browserPageId,
+            url: 'https://example.internal/reports',
+            title: 'Reports',
+            loading: false,
+            canGoBack: false,
+            canGoForward: false
+          } as never
+        }
+        runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
+        placement={{
+          kind: 'client',
+          browserHostClientId: 'client-a',
+          browserHostGeneration: 3,
+          pageHostGeneration: 7
+        }}
+        isActive
+        onUpdatePageState={vi.fn()}
+        onSetUrl={vi.fn()}
+      />
+    </TooltipProvider>
   )
 }
 

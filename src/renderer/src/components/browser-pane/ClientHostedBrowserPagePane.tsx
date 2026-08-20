@@ -20,6 +20,7 @@ import {
   reopenOnServerCaveat
 } from './ReopenBrowserPageOnServerButton'
 import { BrowserNavigationControlRow } from './assemble-chrome/browser-navigation-control-row'
+import { RemoteRuntimeEgressIndicator } from './assemble-chrome/browser-egress-indicator'
 import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overlay'
 import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-bar-navigation'
 import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
@@ -203,6 +204,12 @@ export function ClientHostedBrowserPagePane({
           onAddressBarChange={setAddressBarValue}
           onSubmitAddressBar={() => navigateToUrl(addressBarValue)}
           addressBarInputRef={addressBarInputRef}
+          addressBarLeadingIcon={
+            <RemoteRuntimeEgressIndicator
+              runtimeEnvironmentId={runtimeEnvironmentId}
+              presentation="client-hosted"
+            />
+          }
         />
       </div>
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden bg-background">

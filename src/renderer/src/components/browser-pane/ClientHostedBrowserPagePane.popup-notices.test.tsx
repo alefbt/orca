@@ -11,6 +11,7 @@ const toastMocks = vi.hoisted(() => ({
 
 vi.mock('sonner', () => ({ toast: toastMocks }))
 
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { ClientHostedBrowserPagePane } from './ClientHostedBrowserPagePane'
 
 type PopupEvent = {
@@ -48,29 +49,31 @@ afterEach(() => {
 
 function renderPane(): void {
   render(
-    <ClientHostedBrowserPagePane
-      browserTab={
-        {
-          id: 'page-a',
-          url: 'https://example.internal/app',
-          title: 'App',
-          loading: false,
-          canGoBack: false,
-          canGoForward: false
-        } as never
-      }
-      runtimeEnvironmentId="environment-a"
-      worktreeId="worktree-a"
-      placement={{
-        kind: 'client',
-        browserHostClientId: 'client-a',
-        browserHostGeneration: 3,
-        pageHostGeneration: 7
-      }}
-      isActive
-      onUpdatePageState={vi.fn()}
-      onSetUrl={vi.fn()}
-    />
+    <TooltipProvider>
+      <ClientHostedBrowserPagePane
+        browserTab={
+          {
+            id: 'page-a',
+            url: 'https://example.internal/app',
+            title: 'App',
+            loading: false,
+            canGoBack: false,
+            canGoForward: false
+          } as never
+        }
+        runtimeEnvironmentId="environment-a"
+        worktreeId="worktree-a"
+        placement={{
+          kind: 'client',
+          browserHostClientId: 'client-a',
+          browserHostGeneration: 3,
+          pageHostGeneration: 7
+        }}
+        isActive
+        onUpdatePageState={vi.fn()}
+        onSetUrl={vi.fn()}
+      />
+    </TooltipProvider>
   )
 }
 

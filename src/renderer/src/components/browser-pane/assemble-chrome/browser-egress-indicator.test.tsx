@@ -3,7 +3,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore } from '@/store'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID } from '@/lib/settings-navigation-types'
+import {
+  BROWSER_CLIENT_HOSTED_REMOTE_SETTINGS_TARGET_ID,
+  BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID
+} from '@/lib/settings-navigation-types'
 
 const mocks = vi.hoisted(() => ({
   executionHostId: 'local' as string
@@ -13,7 +16,7 @@ vi.mock('@/lib/worktree-runtime-owner', () => ({
   getExecutionHostIdForWorktree: () => mocks.executionHostId
 }))
 
-import { SshEgressIndicator } from './ssh-egress-indicator'
+import { RemoteRuntimeEgressIndicator, SshEgressIndicator } from './browser-egress-indicator'
 
 type SetState = Parameters<typeof useAppStore.setState>[0]
 
@@ -90,6 +93,71 @@ describe('SshEgressIndicator', () => {
         pane: 'browser',
         repoId: null,
         sectionId: BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID
+      })
+      expect(openSettingsPage).toHaveBeenCalledTimes(1)
+    } finally {
+      useAppStore.setState(prior as unknown as SetState)
+    }
+  })
+})
+
+describe('RemoteRuntimeEgressIndicator', () => {
+  let priorEnvironments: ReturnType<typeof useAppStore.getState>['runtimeEnvironments']
+  beforeEach(() => {
+    priorEnvironments = useAppStore.getState().runtimeEnvironments
+    useAppStore.setState({
+      runtimeEnvironments: [{ id: 'env-1', name: 'Cloud Box' }]
+    } as unknown as SetState)
+  })
+  afterEach(() => {
+    useAppStore.setState({ runtimeEnvironments: priorEnvironments } as unknown as SetState)
+    cleanup()
+  })
+
+  function renderRemote(presentation: 'client-hosted' | 'streamed'): void {
+    render(
+      <TooltipProvider>
+        <RemoteRuntimeEgressIndicator runtimeEnvironmentId="env-1" presentation={presentation} />
+      </TooltipProvider>
+    )
+  }
+
+  it('labels client-hosted pages as browsing through the environment', () => {
+    renderRemote('client-hosted')
+    const icon = screen.getByTestId('ssh-egress-indicator')
+    expect(icon.getAttribute('data-egress')).toBe('remote')
+    expect(icon.getAttribute('aria-label')).toBe('Browsing through Cloud Box')
+  })
+
+  it('labels streamed pages as browsing on the environment', () => {
+    renderRemote('streamed')
+    expect(screen.getByTestId('ssh-egress-indicator').getAttribute('aria-label')).toBe(
+      'Browsing on Cloud Box'
+    )
+  })
+
+  it('falls back to the environment id when no summary is known', () => {
+    useAppStore.setState({ runtimeEnvironments: [] } as unknown as SetState)
+    renderRemote('client-hosted')
+    expect(screen.getByTestId('ssh-egress-indicator').getAttribute('aria-label')).toContain('env-1')
+  })
+
+  it('deep-links its settings button to the client-hosted browser setting', () => {
+    const openSettingsTarget = vi.fn()
+    const openSettingsPage = vi.fn()
+    const prior = {
+      openSettingsTarget: useAppStore.getState().openSettingsTarget,
+      openSettingsPage: useAppStore.getState().openSettingsPage
+    }
+    useAppStore.setState({ openSettingsTarget, openSettingsPage } as unknown as SetState)
+    try {
+      renderRemote('client-hosted')
+      fireEvent.click(screen.getByTestId('ssh-egress-indicator'))
+      fireEvent.click(screen.getByTestId('ssh-egress-indicator-settings'))
+      expect(openSettingsTarget).toHaveBeenCalledWith({
+        pane: 'browser',
+        repoId: null,
+        sectionId: BROWSER_CLIENT_HOSTED_REMOTE_SETTINGS_TARGET_ID
       })
       expect(openSettingsPage).toHaveBeenCalledTimes(1)
     } finally {

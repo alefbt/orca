@@ -77,6 +77,12 @@
       "routedDetail": "Network traffic and DNS go through the workspace's SSH host.",
       "localDetail": "Pages load from this machine and its network.",
       "settingsLink": "Routing settings"
+    },
+    "remoteEgress": {
+      "clientHostedTooltip": "Browsing through {{value0}}",
+      "streamedTooltip": "Browsing on {{value0}}",
+      "clientHostedDetail": "The page renders on this device. Network traffic and DNS go through the remote host.",
+      "streamedDetail": "The page runs on the remote host and streams to this device."
     }
   },
   "githubChecks": {

@@ -309,6 +309,7 @@ export function RemoteBrowserPagePane({
         />
       ) : null}
       <RemoteBrowserPageToolbar
+        runtimeEnvironmentId={runtimeEnvironmentId}
         addressBarValue={addressBarValue}
         onAddressBarChange={setAddressBarValue}
         onSubmitAddressBar={submitAddressBar}
