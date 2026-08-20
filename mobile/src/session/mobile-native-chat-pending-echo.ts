@@ -1,3 +1,5 @@
+import { normalizeReconcileText } from './mobile-native-chat-draft-reconcile'
+
 export type MobileNativeChatPendingMessage = {
   id: string
   text: string
@@ -43,9 +45,12 @@ export function appendMobileNativeChatPending(
   images?: string[]
 ): PendingByKey {
   const current = previous[key] ?? []
+  // Both sides must be normalized the same way: `origin.normalizedText` has its
+  // whitespace collapsed, so comparing a raw trim() never matches a multi-line
+  // send and the repeat would claim the ordinal its predecessor already holds.
   const earlierOutstanding = current.filter(
     (pending) =>
-      pending.text.trim() === origin.normalizedText &&
+      normalizeReconcileText(pending.text) === origin.normalizedText &&
       pending.expectedOccurrence > origin.baselineOccurrences
   ).length
   const expectedImageEchoOrdinal =
