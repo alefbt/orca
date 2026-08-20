@@ -124,6 +124,9 @@ type BrowserScreencastStartResult = {
   subscriptionId: string
   ready: Extract<BrowserScreencastResult, { type: 'ready' }>
   session: BrowserScreencastSession
+  // Why: callers gate frames until they have emitted `ready`, and the snapshot captured
+  // for a joining subscriber lands inside that window. This replays it once the gate opens.
+  flushPendingFrame: () => void
 }
 
 type ActiveBrowserScreencastSubscriber = {
@@ -132,6 +135,7 @@ type ActiveBrowserScreencastSubscriber = {
   done: Promise<void>
   resolveDone: () => void
   viewport: BrowserScreencastViewport
+  pendingFrame: Uint8Array<ArrayBufferLike> | null
 }
 
 type ActiveBrowserScreencastPage = {
@@ -565,8 +569,11 @@ export class RuntimeBrowserCommands {
         minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0),
         onFrame: (bytes) => {
           for (const subscriber of record.subscribers.values()) {
-            // A slow viewer drops this frame without stalling every other viewer.
-            sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
+            // A slow viewer drops this frame without stalling every other viewer, but the
+            // newest refusal is retained so a gate that opens later can still be filled.
+            subscriber.pendingFrame = sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
+              ? null
+              : bytes
           }
           return true
         },
@@ -604,7 +611,8 @@ export class RuntimeBrowserCommands {
       emit: stream.emit,
       done: subscriberDone,
       resolveDone: resolveSubscriberDone,
-      viewport
+      viewport,
+      pendingFrame: null
     })
     // Why: normalizeScreencastViewport keeps undefined dimensions, so a sizeless
     // subscriber taking ownership would clear the emulation for every viewer.
@@ -624,6 +632,16 @@ export class RuntimeBrowserCommands {
     }
     return {
       subscriptionId,
+      flushPendingFrame: () => {
+        const subscriber = active.subscribers.get(subscriptionId)
+        const bytes = subscriber?.pendingFrame
+        if (!subscriber || !bytes) {
+          return
+        }
+        subscriber.pendingFrame = sendRemoteBrowserScreencastFrame(subscriber.sendBinary, bytes)
+          ? null
+          : bytes
+      },
       session: {
         done: subscriberDone,
         stop: () => {

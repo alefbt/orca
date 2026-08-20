@@ -140,6 +140,60 @@ describe('RuntimeBrowserCommands screencast fanout', () => {
     expect(stop).toHaveBeenCalledOnce()
   })
 
+  it('replays the joiner snapshot that its pre-ready gate refused', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const snapshot = new Uint8Array([9, 9, 9])
+    let onFrame: (bytes: Uint8Array<ArrayBufferLike>) => boolean | void = () => true
+    // Why: updateViewport exists to capture a frame for the joiner, and it runs while the
+    // joiner's ready gate is still closed.
+    const updateViewport = vi.fn(async () => {
+      onFrame(snapshot)
+    })
+    startBrowserScreencast.mockImplementation(async (_guest: unknown, options: never) => {
+      onFrame = (options as { onFrame: typeof onFrame }).onFrame
+      return { stop: vi.fn(() => done.resolve()), done: done.promise, updateViewport }
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const creatorSend = vi.fn(() => true)
+    await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 1200,
+        viewportHeight: 800
+      },
+      { sendBinary: creatorSend }
+    )
+    let gateOpen = false
+    const joinerSend = vi.fn(() => gateOpen)
+    const joiner = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 800,
+        viewportHeight: 600
+      },
+      { sendBinary: joinerSend }
+    )
+
+    expect(creatorSend).toHaveBeenCalledWith(snapshot)
+    expect(joinerSend).toHaveBeenCalledWith(snapshot)
+    joinerSend.mockClear()
+    gateOpen = true
+    joiner.flushPendingFrame()
+    expect(joinerSend).toHaveBeenCalledExactlyOnceWith(snapshot)
+
+    // The accepted replay is not retained, so a second flush cannot duplicate it.
+    joinerSend.mockClear()
+    joiner.flushPendingFrame()
+    expect(joinerSend).not.toHaveBeenCalled()
+    joiner.session.stop()
+    await joiner.session.done
+  })
+
   it('admits shared frames through the paired-runtime size guard', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     const done = deferred()

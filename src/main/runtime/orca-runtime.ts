@@ -38329,6 +38329,9 @@ export class OrcaRuntimeService {
       registeredSubscriptionId = screencast.subscriptionId
       options.emit(screencast.ready)
       readyEmitted = true
+      // Why: a joining subscriber's viewport snapshot is captured before this gate opens, and
+      // on a static page Chromium emits nothing after it — without the replay the pane stays blank.
+      screencast.flushPendingFrame()
       await screencast.session.done
       end(true)
       this.cleanupSubscription(screencast.subscriptionId)

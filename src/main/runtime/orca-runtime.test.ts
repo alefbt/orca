@@ -35165,6 +35165,7 @@ describe('OrcaRuntimeService', () => {
     const firstStart = deferred<{
       subscriptionId: string
       ready: never
+      flushPendingFrame: () => void
       session: { stop: () => void; done: Promise<void> }
     }>()
     const firstDone = deferred<void>()
@@ -35191,6 +35192,7 @@ describe('OrcaRuntimeService', () => {
             active: true
           }
         },
+        flushPendingFrame: () => {},
         session: { stop: secondStop, done: secondDone.promise }
       })
       .mockResolvedValueOnce({
@@ -35208,6 +35210,7 @@ describe('OrcaRuntimeService', () => {
             active: true
           }
         },
+        flushPendingFrame: () => {},
         session: { stop: thirdStop, done: thirdDone.promise }
       })
 
@@ -35239,6 +35242,7 @@ describe('OrcaRuntimeService', () => {
     firstStart.resolve({
       subscriptionId: 'browser-screencast:page-1:first',
       ready: {} as never,
+      flushPendingFrame: () => {},
       session: { stop: firstStop, done: firstDone.promise }
     })
     await first
@@ -35287,11 +35291,13 @@ describe('OrcaRuntimeService', () => {
       .mockResolvedValueOnce({
         subscriptionId: 'browser-screencast:page-1:first',
         ready: ready('browser-screencast:page-1:first'),
+        flushPendingFrame: () => {},
         session: { stop: firstStop, done: firstDone.promise }
       })
       .mockResolvedValueOnce({
         subscriptionId: 'browser-screencast:page-1:second',
         ready: ready('browser-screencast:page-1:second'),
+        flushPendingFrame: () => {},
         session: { stop: secondStop, done: secondDone.promise }
       })
 
@@ -35505,16 +35511,23 @@ describe('OrcaRuntimeService', () => {
     expect(cleanup).toHaveBeenCalledTimes(1)
   })
 
-  it('does not deliver or accept browser screencast frames before ready', async () => {
+  it('refuses browser screencast frames before ready and replays them once it is emitted', async () => {
     const runtime = createRuntime()
     const done = deferred<void>()
     const stop = vi.fn(() => done.resolve())
     const startupFrame = new Uint8Array([1, 2, 3])
     const sendBinary = vi.fn()
     const emit = vi.fn()
+    let pendingFrame: Uint8Array | null = null
+    let gatedSend!: (bytes: Uint8Array) => boolean | void
     const browserScreencast = vi.fn(
       async (_params: unknown, stream: { sendBinary: typeof sendBinary }) => {
-        expect(stream.sendBinary(startupFrame)).toBe(false)
+        gatedSend = stream.sendBinary
+        // Why: a joining subscriber's viewport snapshot is captured here, before the caller
+        // has emitted ready, so the fan-out retains what the gate refuses.
+        if (gatedSend(startupFrame) === false) {
+          pendingFrame = startupFrame
+        }
         expect(sendBinary).not.toHaveBeenCalled()
         return {
           subscriptionId: 'browser-screencast:page-1:first',
@@ -35529,6 +35542,13 @@ describe('OrcaRuntimeService', () => {
               url: 'about:blank',
               title: 'Browser',
               active: true
+            }
+          },
+          flushPendingFrame: () => {
+            const bytes = pendingFrame
+            pendingFrame = null
+            if (bytes) {
+              gatedSend(bytes)
             }
           },
           session: { stop, done: done.promise }
@@ -35548,7 +35568,9 @@ describe('OrcaRuntimeService', () => {
     await vi.waitFor(() =>
       expect(emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'ready' }))
     )
-    expect(sendBinary).not.toHaveBeenCalled()
+    // The gate still refuses the frame on arrival; it reaches the client only via the
+    // post-ready replay, so a static page does not leave the subscriber frameless.
+    expect(sendBinary).toHaveBeenCalledExactlyOnceWith(startupFrame)
 
     runtime.cleanupSubscription('browser-screencast:page-1:first')
     await task
