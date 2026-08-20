@@ -23,6 +23,7 @@ import type { BrowserReloadTrigger } from '../navigate/browser-reload-action'
 import { BrowserNavigationControlRow } from './browser-navigation-control-row'
 import { BrowserImportHintButton } from './BrowserImportHintButton'
 import { BrowserToolbarMenu } from './BrowserToolbarMenu'
+import { SshEgressIndicator } from './ssh-egress-indicator'
 import { MarkupDrawButton } from '../annotate/MarkupDrawButton'
 import { destroyPersistentWebview } from '../host-guest/webview-registry'
 import { readBrowserHtmlArtifactRequest } from '../describe-page/browser-artifact-upload'
@@ -33,6 +34,7 @@ import type { GrabIntent } from '../describe-page/browser-page-types'
 export function BrowserPageToolbar({
   browserPageId,
   workspaceId,
+  worktreeId,
   sessionProfileId,
   viewportPresetId,
   isActive,
@@ -68,6 +70,7 @@ export function BrowserPageToolbar({
 }: {
   browserPageId: string
   workspaceId: string
+  worktreeId: string
   sessionProfileId: string | null
   viewportPresetId: BrowserViewportPresetId | null
   isActive: boolean
@@ -263,6 +266,8 @@ export function BrowserPageToolbar({
           createRequest={() => readBrowserHtmlArtifactRequest(currentBrowserUrl)}
         />
       ) : null}
+
+      <SshEgressIndicator worktreeId={worktreeId} />
 
       <Button
         size="icon"

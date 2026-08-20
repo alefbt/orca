@@ -1,6 +1,7 @@
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
+import { BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID } from '@/lib/settings-navigation-types'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSwitchRow } from './SettingsFormControls'
@@ -28,6 +29,7 @@ export function BrowserSshWorkspaceRoutingSetting({
 
   return (
     <SearchableSetting
+      id={BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID}
       title={title}
       description={description}
       keywords={['browser', 'ssh', 'remote', 'proxy', 'tunnel', 'routing', 'host', 'network']}
