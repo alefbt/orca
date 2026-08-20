@@ -49,6 +49,7 @@ export function BrowserPageViewportOverlays({
   navigateToUrl,
   setResourceNotice,
   certificateFailure,
+  sshRouted,
   isBlankTab,
   containerRef,
   browserOverlayViewport,
@@ -72,6 +73,7 @@ export function BrowserPageViewportOverlays({
   navigateToUrl: (url: string) => void
   setResourceNotice: Dispatch<SetStateAction<string | null>>
   certificateFailure: BrowserCertificateFailure | null
+  sshRouted: boolean
   isBlankTab: boolean
   containerRef: RefObject<HTMLDivElement | null>
   browserOverlayViewport: BrowserOverlayViewport
@@ -155,6 +157,7 @@ export function BrowserPageViewportOverlays({
           }}
           onOpenExternal={(url) => void window.api.shell.openUrl(url)}
           certificateFailure={certificateFailure}
+          sshRoutedHint={sshRouted}
           expectedBrowserPageId={browserTab.id}
           onProceedCertificate={(challengeId) =>
             window.api.browser.proceedCertificate({

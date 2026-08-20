@@ -158,6 +158,12 @@ export async function removeRegisteredSshTarget(targetId: string): Promise<void>
       ])
       await partitions.releaseLocalSshBrowserPartitionsForTarget(targetId)
       await storage.clearBrowserRoutePartitionStorageForLocalSshTarget(targetId)
+      // Why (review P2-2): a prepare racing the removal can re-register between
+      // release and clear; one delayed second pass reclaims what slipped
+      // through (mirrors the environment-removal retry).
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      await partitions.releaseLocalSshBrowserPartitionsForTarget(targetId)
+      await storage.clearBrowserRoutePartitionStorageForLocalSshTarget(targetId)
     } catch (error) {
       console.warn(
         `[ssh] Failed to clear browser partitions for removed target ${targetId}: ${error instanceof Error ? error.message : String(error)}`

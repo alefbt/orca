@@ -248,6 +248,8 @@ export type GlobalSettings = {
   browserClientHostedRemoteEnabled?: boolean
   /** Routes SSH-workspace browser pages through the workspace's SSH host; off = plain local browsing. */
   browserSshWorkspaceRoutingEnabled?: boolean
+  /** Per-target opt-outs recorded from the routing error card's "Browse from this device instead". */
+  browserSshWorkspaceRoutingDisabledTargetIds?: string[]
   /** One-shot migration flag for the floating-workspace default-on rollout; after migration an explicit off sticks. */
   floatingTerminalDefaultedForAllUsers?: boolean
   /** Start dir for new floating-workspace terminal tabs; empty or '~' = home dir. */

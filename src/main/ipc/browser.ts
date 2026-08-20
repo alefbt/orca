@@ -103,8 +103,23 @@ export function registerBrowserHandlers(): void {
   // so the renderer asks main to prepare it and blocks the webview until then.
   ipcMain.handle(
     'browser:prepareSshWorkspacePartition',
-    async (_event, args: { targetId?: unknown; browserProfileId?: unknown }) => {
+    async (
+      event,
+      args: { targetId?: unknown; browserProfileId?: unknown; skipProbe?: unknown }
+    ) => {
+      // Why (review P1-2): preparing mints bindings whose LRU eviction destroys
+      // cookie jars; only the trusted renderer naming a REGISTERED target may.
+      if (!isTrustedBrowserRenderer(event.sender)) {
+        throw new Error('browser_local_route_renderer_untrusted')
+      }
       if (typeof args?.targetId !== 'string' || args.targetId.length === 0) {
+        throw new Error('browser_local_route_target_invalid')
+      }
+      const { getSshConnectionStore } = await import('./ssh')
+      const registered = getSshConnectionStore()
+        ?.listTargets()
+        .some((target) => target.id === args.targetId)
+      if (!registered) {
         throw new Error('browser_local_route_target_invalid')
       }
       const { prepareLocalSshBrowserPartition } =
@@ -114,7 +129,8 @@ export function registerBrowserHandlers(): void {
         browserProfileId:
           typeof args.browserProfileId === 'string' && args.browserProfileId.length > 0
             ? args.browserProfileId
-            : 'default'
+            : 'default',
+        skipProbe: args.skipProbe === true
       })
     }
   )

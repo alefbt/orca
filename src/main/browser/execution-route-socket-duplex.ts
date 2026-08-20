@@ -15,6 +15,21 @@ export function openExecutionRouteSocketAsDuplex(
 ): Promise<Duplex> {
   return new Promise<Duplex>((resolve, reject) => {
     let settled = false
+    // Why (review P2-1): some transports flow buffered bytes on the nextTick
+    // queue while emitting 'connect' from a microtask — a server banner or TLS
+    // record can arrive before any consumer listener exists. Buffer from the
+    // very start and replay through the duplex.
+    const earlyData: Buffer[] = []
+    let deliver = (bytes: Buffer): void => {
+      earlyData.push(bytes)
+    }
+    socket.on('data', (bytes) => {
+      deliver(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes))
+    })
+    const swapDelivery = (next: (bytes: Buffer) => void): Buffer[] => {
+      deliver = next
+      return earlyData
+    }
     const fail = (error: Error): void => {
       if (settled) {
         return
@@ -44,12 +59,15 @@ export function openExecutionRouteSocketAsDuplex(
       }
       settled = true
       clearTimeout(timeout)
-      resolve(wrapConnectedSocket(socket))
+      resolve(wrapConnectedSocket(socket, swapDelivery))
     })
   })
 }
 
-function wrapConnectedSocket(socket: BrowserNetworkTunnelSocket): Duplex {
+function wrapConnectedSocket(
+  socket: BrowserNetworkTunnelSocket,
+  swapDelivery: (next: (bytes: Buffer) => void) => Buffer[]
+): Duplex {
   const duplex = new Duplex({
     read: () => {
       socket.resume()
@@ -66,11 +84,16 @@ function wrapConnectedSocket(socket: BrowserNetworkTunnelSocket): Duplex {
       callback(error)
     }
   })
-  socket.on('data', (bytes) => {
-    if (!duplex.push(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes))) {
+  const buffered = swapDelivery((bytes) => {
+    if (!duplex.push(bytes)) {
       socket.pause()
     }
   })
+  for (const bytes of buffered.splice(0)) {
+    if (!duplex.push(bytes)) {
+      socket.pause()
+    }
+  }
   socket.on('end', () => {
     duplex.push(null)
   })

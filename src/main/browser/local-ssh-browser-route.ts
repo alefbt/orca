@@ -59,6 +59,48 @@ export class LocalSshBrowserRoute {
     return openExecutionRouteSocketAsDuplex(route.connect(target))
   }
 
+  /**
+   * Classifies whether the SSH server permits TCP forwarding by dialing a
+   * loopback port that is closed on any sane host: a channel-level refusal
+   * proves forwarding is allowed, while sshd's "administratively prohibited"
+   * reason (AllowTcpForwarding no / PermitOpen) proves it is not. Unknown
+   * outcomes read as ok — the probe exists to explain failures, never to
+   * block a setup that might work.
+   */
+  async probeForwarding(
+    timeoutMs = 4_000
+  ): Promise<'ok' | 'forwarding-blocked' | 'ssh-unavailable'> {
+    let route: Awaited<ReturnType<BrowserNetworkExecutionRouteResolver>>
+    try {
+      route = await this.requireExecutionRoute()
+    } catch {
+      return 'ssh-unavailable'
+    }
+    const socket = route.connect({ host: '127.0.0.1', port: 9 })
+    return new Promise((resolve) => {
+      let settled = false
+      const settle = (verdict: 'ok' | 'forwarding-blocked' | 'ssh-unavailable'): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        clearTimeout(timeout)
+        socket.destroy()
+        resolve(verdict)
+      }
+      const timeout = setTimeout(() => settle('ok'), timeoutMs)
+      socket.on('connect', () => settle('ok'))
+      socket.on('error', (error) =>
+        settle(
+          /administratively|prohibit|forbidden|not allowed|denied/i.test(error.message)
+            ? 'forwarding-blocked'
+            : 'ok'
+        )
+      )
+      socket.on('close', () => settle('ok'))
+    })
+  }
+
   private async requireExecutionRoute(): Promise<
     Awaited<ReturnType<BrowserNetworkExecutionRouteResolver>>
   > {
@@ -145,6 +187,17 @@ export async function retainLocalSshBrowserRoute(
     void route.close().catch(() => {})
     throw error
   }
+}
+
+/** Probe the retained route for a target; the route must have been retained first. */
+export async function probeLocalSshBrowserRouteForwarding(
+  targetId: string
+): Promise<'ok' | 'forwarding-blocked' | 'ssh-unavailable'> {
+  const route = routesByTargetId.get(targetId)
+  if (!route) {
+    return 'ssh-unavailable'
+  }
+  return route.probeForwarding()
 }
 
 export async function closeLocalSshBrowserRouteForTarget(targetId: string): Promise<void> {

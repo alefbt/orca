@@ -8,6 +8,7 @@ import type {
 import type { BrowserNetworkTunnelSocket } from './browser-network-tunnel-stream-state'
 import {
   closeAllLocalSshBrowserRoutes,
+  closeLocalSshBrowserRouteForTarget,
   LocalSshBrowserRoute,
   retainLocalSshBrowserRoute
 } from './local-ssh-browser-route'
@@ -215,7 +216,7 @@ describe('LocalSshBrowserRoute', () => {
     accepted.destroy()
   })
 
-  it('retains one shared route per target and forgets it when startup fails', async () => {
+  it('retains one shared route per target', async () => {
     const dependencies = {
       resolveExecutionRoute: async () => fakeExecutionRoute('route-shared'),
       getAuthority: () => ({ providerEpoch: 'epoch-1', connectionGeneration: 1 })
@@ -223,5 +224,64 @@ describe('LocalSshBrowserRoute', () => {
     const first = await retainLocalSshBrowserRoute('target-shared', dependencies)
     const second = await retainLocalSshBrowserRoute('target-shared', dependencies)
     expect(second.port).toBe(first.port)
+  })
+
+  it('drops the shared route on explicit close so a re-add starts fresh', async () => {
+    const dependencies = {
+      resolveExecutionRoute: async () => fakeExecutionRoute('route-shared'),
+      getAuthority: () => ({ providerEpoch: 'epoch-1', connectionGeneration: 1 })
+    }
+    const first = await retainLocalSshBrowserRoute('target-cycled', dependencies)
+    await closeLocalSshBrowserRouteForTarget('target-cycled')
+    const second = await retainLocalSshBrowserRoute('target-cycled', dependencies)
+    // Why: the closed listener is unusable; a fresh retain must produce a live one.
+    const socket = await socksConnect(second.port, 'after-readd', 80)
+    expect((await readExact(socket, 10))[1]).toBe(0)
+    socket.destroy()
+    expect(first.port).not.toBe(0)
+  })
+
+  it('classifies forwarding probes by the SSH refusal reason', async () => {
+    const behaviors = new Map<string, string>()
+    const route = new LocalSshBrowserRoute('target-probe', {
+      resolveExecutionRoute: async () => {
+        const executionRoute = fakeExecutionRoute('route-probe')
+        const originalConnect = executionRoute.connect
+        executionRoute.connect = (target) => {
+          const reason = behaviors.get('reason')
+          if (reason !== undefined) {
+            const socket = new FakeTunnelSocket('never-connect')
+            queueMicrotask(() => {
+              socket.emit('error', new Error(reason))
+            })
+            return socket
+          }
+          return originalConnect(target)
+        }
+        return executionRoute
+      },
+      getAuthority: () => ({ providerEpoch: 'epoch-1', connectionGeneration: 1 })
+    })
+    routes.push(route)
+    await route.listen()
+
+    behaviors.set('reason', 'administratively prohibited: open failed')
+    expect(await route.probeForwarding(500)).toBe('forwarding-blocked')
+    // Why: a TCP-level refusal proves the channel was ALLOWED — forwarding works.
+    behaviors.set('reason', 'connect failed: Connection refused')
+    expect(await route.probeForwarding(500)).toBe('ok')
+    behaviors.delete('reason')
+    expect(await route.probeForwarding(500)).toBe('ok')
+  })
+
+  it('reports ssh-unavailable when the probe cannot resolve a route', async () => {
+    const route = new LocalSshBrowserRoute('target-down', {
+      resolveExecutionRoute: async () => {
+        throw new Error('browser_tunnel_execution_host_unavailable')
+      },
+      getAuthority: () => ({ providerEpoch: 'epoch-1', connectionGeneration: 1 })
+    })
+    routes.push(route)
+    expect(await route.probeForwarding(500)).toBe('ssh-unavailable')
   })
 })

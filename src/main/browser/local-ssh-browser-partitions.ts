@@ -1,4 +1,5 @@
-import { app, session, type Session, type WebContents } from 'electron'
+import { app, session, webContents, type Session, type WebContents } from 'electron'
+import { closeRouteGuest } from './browser-route-guest-guard'
 import { sshExecutionHostStorageIdentity } from './browser-execution-host-storage-identity'
 import {
   deriveBrowserRoutePartition,
@@ -21,6 +22,7 @@ import { enforceBrowserRouteWebRtcPolicy } from './browser-route-webrtc-policy'
 import { browserSessionRegistry } from './browser-session-registry'
 import {
   closeLocalSshBrowserRouteForTarget,
+  probeLocalSshBrowserRouteForwarding,
   retainLocalSshBrowserRoute
 } from './local-ssh-browser-route'
 
@@ -71,6 +73,8 @@ export function localSshBrowserPartitionForSession(webSession: Session): string 
 export async function prepareLocalSshBrowserPartition(input: {
   targetId: string
   browserProfileId: string
+  /** Set by the error card's "Try anyway": mounts despite a failed forwarding probe. */
+  skipProbe?: boolean
 }): Promise<{ partition: string }> {
   const identityKey = JSON.stringify([input.targetId, input.browserProfileId])
   let pending = preparedByIdentityKey.get(identityKey)
@@ -90,6 +94,7 @@ export async function prepareLocalSshBrowserPartition(input: {
 async function prepareFresh(input: {
   targetId: string
   browserProfileId: string
+  skipProbe?: boolean
 }): Promise<PreparedLocalSshPartition> {
   const orcaProfileId = activeBrowserRoutePartitionOrcaProfileId()
   if (!orcaProfileId) {
@@ -97,6 +102,18 @@ async function prepareFresh(input: {
   }
   browserSessionRegistry.requireRouteBrowserProfile(input.browserProfileId)
   const proxyEndpoint = await retainLocalSshBrowserRoute(input.targetId)
+  if (!input.skipProbe) {
+    // Why: AllowTcpForwarding no is the one enterprise config that breaks every
+    // page while the terminal works; catching it here puts a plain-language
+    // explanation on the gate card instead of opaque per-page SOCKS errors.
+    const verdict = await probeLocalSshBrowserRouteForwarding(input.targetId)
+    if (verdict === 'forwarding-blocked') {
+      throw new Error('browser_local_route_forwarding_blocked')
+    }
+    if (verdict === 'ssh-unavailable') {
+      throw new Error('browser_local_route_ssh_unavailable')
+    }
+  }
   const derived = deriveBrowserRoutePartition({
     orcaProfileId,
     browserProfileId: input.browserProfileId,
@@ -179,6 +196,15 @@ export async function releaseLocalSshBrowserPartitionsForTarget(targetId: string
     if (prepared?.targetId === targetId) {
       preparedByIdentityKey.delete(identityKey)
       preparedByPartition.delete(prepared.partition)
+      // Why (review P2-3): a guest still mounted on the partition would write
+      // cookies back after the clear, resurrecting an unsweepable directory
+      // (its binding is gone, and the orphan scan only walks bindings).
+      const partitionSession = session.fromPartition(prepared.partition)
+      for (const contents of webContents.getAllWebContents()) {
+        if (!contents.isDestroyed() && contents.session === partitionSession) {
+          closeRouteGuest(contents)
+        }
+      }
       browserSessionRegistry.clearRoutePartitionPolicies(prepared.partition)
     }
   }

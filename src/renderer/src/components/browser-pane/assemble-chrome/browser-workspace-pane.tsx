@@ -53,8 +53,16 @@ export default function BrowserPane({
   const automationVisiblePageIds = useBrowserAutomationVisiblePageIds(browserPageIds)
   const mobileDrivenPageIds = useBrowserMobileDrivenPageIds(browserPageIds)
   // Why: inactive webviews must stay mounted in their original DOM parent; unmounting/reparenting loses form text and SPA state.
-  const renderedBrowserPages = browserPages.filter(
-    (page) => !getBrowserPageRuntimeEnvironmentId(page, activeRuntimeEnvironmentId)
+  const renderedBrowserPages = useMemo(
+    () =>
+      browserPages.filter(
+        (page) => !getBrowserPageRuntimeEnvironmentId(page, activeRuntimeEnvironmentId)
+      ),
+    [browserPages, activeRuntimeEnvironmentId]
+  )
+  const renderedBrowserPageIds = useMemo(
+    () => renderedBrowserPages.map((page) => page.id),
+    [renderedBrowserPages]
   )
   const pageDriver = useBrowserDriverForPage(activeBrowserPageId)
   // Why: a runtime-backed page is streamed, never locally driven, so its driver must read idle.
@@ -127,6 +135,7 @@ export default function BrowserPane({
         <SshRoutedBrowserPageGate
           worktreeId={browserTab.worktreeId}
           sessionProfileId={browserTab.sessionProfileId ?? null}
+          pageIds={renderedBrowserPageIds}
         >
           {(routedPartition) => (
             <div className="relative flex min-h-0 flex-1">

@@ -122,6 +122,7 @@ export type BrowserApi = {
   prepareSshWorkspacePartition: (args: {
     targetId: string
     browserProfileId?: string
+    skipProbe?: boolean
   }) => Promise<{ partition: string }>
   sessionCreateProfile: (
     args: {

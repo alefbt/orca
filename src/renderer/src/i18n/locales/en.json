@@ -27,7 +27,8 @@
       "certificateChallengeExpired": "This certificate approval expired. Retry the page to request a new one.",
       "certificateChallengeChanged": "The certificate request changed. Retry the page and review the new warning.",
       "certificateChallengeUnavailable": "This certificate request is no longer available. Retry the page to request a new one.",
-      "certificateProceedFailed": "Orca could not approve this certificate request. Retry the page and try again."
+      "certificateProceedFailed": "Orca could not approve this certificate request. Retry the page and try again.",
+      "sshRoutedHint": "This page browses through the workspace's SSH host — the host may be disconnected or unable to reach this site."
     },
     "guestRecovery": {
       "title": "Browser page stopped",
@@ -60,7 +61,13 @@
       "preparingTitle": "Connecting through the SSH host",
       "errorTitle": "SSH browser routing unavailable",
       "errorDescription": "Pages in this workspace browse through its SSH host, and that connection is not available right now.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "tryAnyway": "Try anyway",
+      "browseLocally": "Browse from this device instead",
+      "forwardingBlockedTitle": "The SSH server blocks browser traffic",
+      "sshUnavailableTitle": "SSH connection unavailable",
+      "forwardingBlockedDescription": "This server refuses TCP forwarding (often “AllowTcpForwarding no” in its sshd config), which browsing through it requires. Ask its administrator to allow forwarding, or browse from this device instead.",
+      "sshUnavailableDescription": "Pages in this workspace browse through its SSH host, and that connection isn't available right now. Reconnect the host, then retry."
     }
   },
   "githubChecks": {
@@ -103,7 +110,9 @@
       },
       "sshWorkspaceRouting": {
         "title": "Browse through SSH workspace hosts",
-        "description": "Browser pages in SSH workspaces send their traffic through the workspace's SSH host, with DNS resolved there. Off means pages browse from this machine."
+        "description": "Browser pages in SSH workspaces send their traffic through the workspace's SSH host, with DNS resolved there. Off means pages browse from this machine.",
+        "disabledHosts": "Hosts browsing from this device instead:",
+        "enableHost": "Route again"
       }
     }
   },

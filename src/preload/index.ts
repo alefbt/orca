@@ -3008,6 +3008,7 @@ const api = {
     prepareSshWorkspacePartition: (args: {
       targetId: string
       browserProfileId?: string
+      skipProbe?: boolean
     }): Promise<{ partition: string }> =>
       ipcRenderer.invoke('browser:prepareSshWorkspacePartition', args),
 

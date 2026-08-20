@@ -52,7 +52,10 @@ describe('local ssh browser partition identity', () => {
 
   it('keeps the storage identity aligned with the paired nested-SSH identity', () => {
     // Why: both owners key SSH storage by ['ssh', targetId]; alignment means a
-    // future unification cannot strand a jar under a mismatched identity.
-    expect(sshExecutionHostStorageIdentity('t-1')).toContain('"ssh","t-1"')
+    // future unification cannot strand a jar under a mismatched identity. Full
+    // golden string — a dropped domain tag must fail, not pass by substring.
+    expect(sshExecutionHostStorageIdentity('t-1')).toBe(
+      '["orca-browser-execution-host-storage",1,"ssh","t-1"]'
+    )
   })
 })

@@ -3394,6 +3394,11 @@ app.on('will-quit', (e) => {
   runtime?.getAgentBrowserBridge()?.destroyAllSessions()
   // Why: headless offscreen browser windows are main-process owned; tear them down explicitly on quit.
   runtime?.getOffscreenBrowserBackend()?.destroyAll?.()
+  // Why (review P2-4): local SSH browser routes own loopback listeners and, on the
+  // system-ssh path, `ssh -N -D` children that would otherwise outlive the app.
+  const localSshRouteShutdown = import('./browser/local-ssh-browser-route')
+    .then((routes) => routes.closeAllLocalSshBrowserRoutes())
+    .catch(() => {})
   browserManager.setBrowserGuestStateChangedListener(null)
   const emulatorShutdown = runtime?.getEmulatorBridge()?.destroyAllSessions() ?? Promise.resolve()
   // Why immediately before store.flushAsync() with no await in between: beginSshShutdown() marks every
@@ -3443,6 +3448,7 @@ app.on('will-quit', (e) => {
     { name: 'watchers', promise: watcherShutdown },
     { name: 'emulator', promise: emulatorShutdown },
     { name: 'browser-client-hosts', promise: browserClientHostShutdown },
+    { name: 'local-ssh-browser-routes', promise: localSshRouteShutdown },
     { name: 'ssh', promise: sshShutdown },
     { name: 'plugin-hosts', promise: pluginHostShutdown },
     { name: 'codex-backfill-recovery', promise: codexBackfillRecoveryShutdown },

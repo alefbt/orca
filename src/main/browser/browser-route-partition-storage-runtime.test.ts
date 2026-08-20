@@ -106,6 +106,26 @@ describe('route partition storage runtime with local SSH scopes', () => {
     expect(mocks.cleared).toEqual([])
   })
 
+  it('honors the retention-probe union: a retained partition survives every destructive path', async () => {
+    // Why (review): the earlier mocks substituted the union wiring away; this
+    // exercises the REAL retention module through the runtime's isPartitionLive.
+    const { registerBrowserRoutePartitionRetentionProbe } =
+      await import('./browser-route-partition-retention')
+    const unregister = registerBrowserRoutePartitionRetentionProbe(
+      (partition) => partition === REMOVED_TARGET_PARTITION
+    )
+    try {
+      const swept = await collectOrphanedBrowserRoutePartitionStorage(() => ['target-live'])
+      expect(swept).toEqual([])
+      const cleared = await clearBrowserRoutePartitionStorageForLocalSshTarget('target-removed')
+      expect(cleared.clearedPartitions).toEqual([])
+      expect(cleared.livePartitions).toEqual([REMOVED_TARGET_PARTITION])
+      expect(mocks.bindings.has(REMOVED_TARGET_PARTITION)).toBe(true)
+    } finally {
+      unregister()
+    }
+  })
+
   it('clears exactly the removed target’s scope on explicit removal', async () => {
     const result = await clearBrowserRoutePartitionStorageForLocalSshTarget('target-removed')
     expect(result.clearedPartitions).toEqual([REMOVED_TARGET_PARTITION])
