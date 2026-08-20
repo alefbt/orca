@@ -18,7 +18,6 @@ describe('BrowserClientHostedRemoteSetting', () => {
     expect(markup).toContain('Host remote browser pages on this device')
     expect(markup).toContain('aria-checked="true"')
     expect(markup).toContain('new pages only')
-    expect(markup).toContain('never moves a live page')
   })
 
   it('reads an explicit opt-out as off', () => {

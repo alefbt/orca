@@ -11,6 +11,6 @@ export function getBrowserClientHostedRemoteTitle(): string {
 export function getBrowserClientHostedRemoteDescription(): string {
   return translate(
     'settings.browser.clientHostedRemote.description',
-    'Render remote workspace pages in a browser window on this desktop while their network traffic still goes through the remote host. Applies to new pages only — pages that are already open keep running where they are until you close or reopen them, and Orca never moves a live page.'
+    'Render remote workspace pages on this desktop; network traffic still goes through the remote host. Applies to new pages only.'
   )
 }
