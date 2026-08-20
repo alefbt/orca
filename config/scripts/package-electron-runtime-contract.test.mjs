@@ -446,19 +446,19 @@ describe('Electron runtime package contract', () => {
       (step) => step.name === 'Test Windows-specific boundaries'
     )
 
+    const required = [
+      'browser-client-page-renderer-lifecycle',
+      'browser-route-webrtc-egress',
+      'browser-route-tcp-egress',
+      'browser-route-h3-egress',
+      'browser-route-dns-prefetch'
+    ].map((name) => `src/main/browser/${name}.electron.test.ts`)
+
     expect(linuxStep.run).toContain('xvfb-run --auto-servernum')
-    expect(linuxStep.run).toContain(
-      'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts'
-    )
-    expect(linuxStep.run).toContain('src/main/browser/browser-route-webrtc-egress.electron.test.ts')
-    expect(linuxStep.run).toContain('src/main/browser/browser-route-tcp-egress.electron.test.ts')
-    expect(windowsStep.run).toContain(
-      'src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts'
-    )
-    expect(windowsStep.run).toContain(
-      'src/main/browser/browser-route-webrtc-egress.electron.test.ts'
-    )
-    expect(windowsStep.run).toContain('src/main/browser/browser-route-tcp-egress.electron.test.ts')
+    for (const file of required) {
+      expect(linuxStep.run).toContain(file)
+      expect(windowsStep.run).toContain(file)
+    }
   })
 
   it('smokes the packaged CLI from outside the checkout in PR checks', () => {

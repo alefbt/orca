@@ -501,6 +501,8 @@ jobs:
           src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts
           src/main/browser/browser-route-tcp-egress.electron.test.ts
           src/main/browser/browser-route-webrtc-egress.electron.test.ts
+          src/main/browser/browser-route-h3-egress.electron.test.ts
+          src/main/browser/browser-route-dns-prefetch.electron.test.ts
 
       - name: Build package inputs
         run: |
@@ -580,6 +582,8 @@ jobs:
           src/main/browser/browser-client-page-renderer-lifecycle.electron.test.ts
           src/main/browser/browser-route-tcp-egress.electron.test.ts
           src/main/browser/browser-route-webrtc-egress.electron.test.ts
+          src/main/browser/browser-route-h3-egress.electron.test.ts
+          src/main/browser/browser-route-dns-prefetch.electron.test.ts
           src/main/providers/windows-conpty-wide-char-duplication.node-pty.test.ts
           src/main/providers/pty-repaint-wide-char-buffer.node-pty.test.ts
           src/main/cli/wsl-cli-powershell-boundary.test.ts
