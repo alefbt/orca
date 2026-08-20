@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
-import { normalizeReconcileText } from './mobile-native-chat-draft-reconcile'
+import {
+  countUserTextOccurrences,
+  normalizeReconcileText
+} from './mobile-native-chat-draft-reconcile'
 import {
   appendMobileNativeChatPending,
   type MobileNativeChatSendOrigin
@@ -19,13 +22,9 @@ function sendOrigin(
     draftKey: 'host\0worktree\0tab',
     pendingKey: 'host\0worktree\0tab\0session',
     normalizedText,
-    baselineOccurrences: messages.filter(
-      (message) =>
-        message.role === 'user' &&
-        normalizeReconcileText(
-          message.blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join(' ')
-        ) === normalizedText
-    ).length,
+    // Production's own counter, not a copy of it: a private re-implementation
+    // would keep passing through exactly the normalization drift under test.
+    baselineOccurrences: countUserTextOccurrences(messages, normalizedText),
     baselineTailMessageId: messages.at(-1)?.id ?? null,
     baselineResolved: true
   }
@@ -96,5 +95,40 @@ describe('appendMobileNativeChatPending ordinals for repeated sends', () => {
     )
 
     expect(both[KEY]?.map((item) => item.expectedOccurrence)).toEqual([1, 2])
+  })
+})
+
+describe('appendMobileNativeChatPending for sends the transcript cannot echo', () => {
+  const KEY = 'host\0worktree\0tab\0session'
+
+  // The row this send produces normalizes to null, so neither the count pass nor
+  // the glue matcher can ever see it. An echo would pin at the tail forever.
+  it('records no echo for a prompt made only of image markers', () => {
+    const messages = [userTurn('m1', 'hi')]
+    const pending = appendMobileNativeChatPending(
+      {},
+      KEY,
+      'p1',
+      sendOrigin('[Image #1]', messages),
+      '[Image #1]'
+    )
+
+    expect(pending[KEY]).toBeUndefined()
+    expect(
+      retireLandedMobileNativeChatPending(
+        [...messages, userTurn('m2', '[Image #1]')],
+        pending[KEY] ?? [],
+        NO_IMAGE_ECHOES
+      )
+    ).toEqual([])
+  })
+
+  it('still records an image echo, whose text is empty by design', () => {
+    const pending = appendMobileNativeChatPending({}, KEY, 'p1', sendOrigin('', []), '', [
+      'file:///photo.jpg'
+    ])
+
+    expect(pending[KEY]).toHaveLength(1)
+    expect(pending[KEY]?.[0]?.expectedOccurrence).toBe(1)
   })
 })
