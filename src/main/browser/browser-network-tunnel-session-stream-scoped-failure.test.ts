@@ -44,7 +44,9 @@ type PairedTunnel = {
 }
 
 // Both peers are real so a per-stream failure can be told apart from a tunnel-wide teardown.
-function createPairedTunnel(): PairedTunnel {
+function createPairedTunnel(
+  claimAggregateRetainedBytes?: (bytes: number) => (() => void) | null
+): PairedTunnel {
   const sockets: PairedSocket[] = []
   const closures: Error[] = []
   const onSessionClose = vi.fn()
@@ -60,7 +62,8 @@ function createPairedTunnel(): PairedTunnel {
       client?.handleBinary(bytes)
       return true
     },
-    onClose: onSessionClose
+    onClose: onSessionClose,
+    claimAggregateRetainedBytes
   })
   client = new BrowserNetworkTunnelClient({
     tunnelGeneration: 7,
@@ -104,6 +107,34 @@ describe('BrowserNetworkTunnelSession stream-scoped failures', () => {
     tunnel.sockets[1]!.emit('end')
 
     await expect(pending).rejects.toThrow('destination_closed_before_connect')
+    expect(tunnel.closures).toEqual([])
+    expect(healthy.destroyed).toBe(false)
+    expect(tunnel.sockets[0]!.destroyed).toBe(false)
+  })
+
+  it('fails only the receiving stream when destination bytes exhaust the retained budget', async () => {
+    const tunnel = createPairedTunnel(() => null)
+    const healthy = await openConnectedStream(tunnel, 'healthy.internal')
+    const starved = await openConnectedStream(tunnel, 'starved.internal')
+
+    tunnel.sockets[1]!.emit('data', new Uint8Array([1, 2, 3]))
+
+    expect(starved.destroyed).toBe(true)
+    expect(tunnel.onSessionClose).not.toHaveBeenCalled()
+    expect(tunnel.closures).toEqual([])
+    expect(healthy.destroyed).toBe(false)
+    expect(tunnel.sockets[0]!.destroyed).toBe(false)
+  })
+
+  it('fails only the sending stream when a destination write exhausts the retained budget', async () => {
+    const tunnel = createPairedTunnel(() => null)
+    const healthy = await openConnectedStream(tunnel, 'healthy.internal')
+    const starved = await openConnectedStream(tunnel, 'starved.internal')
+
+    starved.write(new Uint8Array([1, 2, 3]))
+
+    expect(starved.destroyed).toBe(true)
+    expect(tunnel.onSessionClose).not.toHaveBeenCalled()
     expect(tunnel.closures).toEqual([])
     expect(healthy.destroyed).toBe(false)
     expect(tunnel.sockets[0]!.destroyed).toBe(false)

@@ -6,6 +6,7 @@ import {
 } from '../../shared/browser-network-tunnel-protocol'
 import { admitBrowserNetworkTunnelOpen } from './browser-network-tunnel-open-admission'
 import {
+  BROWSER_NETWORK_TUNNEL_ROUTE_BUFFER_OVERFLOW,
   flushBrowserNetworkDestination,
   grantBrowserNetworkDestinationCredit,
   halfCloseBrowserNetworkDestination,
@@ -170,8 +171,18 @@ export class BrowserNetworkTunnelSession {
       (bytes) => this.resourceBudget.claimRetainedBytes(bytes)
     )
     if (error) {
-      this.failProtocolStream(stream, error)
+      this.failDestinationFlow(stream, error)
     }
+  }
+
+  // The host grants more credit than the retained pool can hold (128 streams x 256 KB vs 8 MB),
+  // so a budget miss is reachable by a fully conforming peer and must not fence the tunnel.
+  private failDestinationFlow(stream: BrowserNetworkTunnelStream, code: string): void {
+    if (code === BROWSER_NETWORK_TUNNEL_ROUTE_BUFFER_OVERFLOW) {
+      this.failStream(stream, code)
+      return
+    }
+    this.failProtocolStream(stream, code)
   }
 
   private grantDestinationCredit(
@@ -194,7 +205,7 @@ export class BrowserNetworkTunnelSession {
       return
     }
     if (!this.resourceBudget.reserveRetainedBytes(bytes.byteLength)) {
-      this.failProtocolStream(stream, 'route_buffer_overflow')
+      this.failStream(stream, BROWSER_NETWORK_TUNNEL_ROUTE_BUFFER_OVERFLOW)
       return
     }
     const error = queueBrowserNetworkDestinationData(stream, bytes)
