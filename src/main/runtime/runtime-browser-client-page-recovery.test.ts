@@ -23,8 +23,8 @@ describe('runtime browser client page recovery', () => {
     })
 
     expect(commands).toEqual([
-      { type: 'closePage', pageHostGeneration: 7 },
-      { type: 'navigate', pageHostGeneration: 8 }
+      { browserPageId: 'page-a', type: 'closePage', pageHostGeneration: 7 },
+      { browserPageId: 'page-a', type: 'navigate', pageHostGeneration: 8 }
     ])
     expect(authority.createClientPage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -69,47 +69,145 @@ describe('runtime browser client page recovery', () => {
       notifyWorkspace: vi.fn()
     })
 
-    expect(commands).toEqual([{ type: 'navigate', pageHostGeneration: 8 }])
+    expect(commands).toEqual([{ browserPageId: 'page-a', type: 'navigate', pageHostGeneration: 8 }])
     expect(pages.getPage('page-a')?.placement).toEqual(newPlacement)
+  })
+
+  it('degrades a failed navigation to that page instead of failing the attach', async () => {
+    const { authority, notifyWorkspace, pages } = harness({
+      pageIds: ['page-a', 'page-b'],
+      navigateFailures: ['page-a']
+    })
+    const releaseUnrecoverablePage = vi.fn()
+
+    await expect(
+      recoverUnavailableRuntimeBrowserClientPages({
+        lease: lease([]),
+        authority,
+        pages,
+        notifyWorkspace,
+        releaseUnrecoverablePage
+      })
+    ).resolves.toBeUndefined()
+
+    expect(pages.getPage('page-b')).toMatchObject({
+      placement: { pageHostGeneration: 10 },
+      loading: false
+    })
+    // The page kept a live placement, so it stays listed and a later attach can retry it.
+    expect(pages.getPage('page-a')?.placement).toMatchObject({ pageHostGeneration: 8 })
+    expect(releaseUnrecoverablePage).not.toHaveBeenCalled()
+  })
+
+  it('releases a page whose recovery left it without any placement', async () => {
+    const { authority, notifyWorkspace, pages } = harness({
+      pageIds: ['page-a', 'page-b'],
+      creationFailures: ['page-a']
+    })
+    const releaseUnrecoverablePage = vi.fn()
+
+    await recoverUnavailableRuntimeBrowserClientPages({
+      lease: lease([]),
+      authority,
+      pages,
+      notifyWorkspace,
+      releaseUnrecoverablePage
+    })
+
+    expect(releaseUnrecoverablePage).toHaveBeenCalledOnce()
+    expect(releaseUnrecoverablePage).toHaveBeenCalledWith(
+      expect.objectContaining({ browserPageId: 'page-a' })
+    )
+    expect(pages.getPage('page-b')).toMatchObject({ placement: { pageHostGeneration: 10 } })
+  })
+
+  it('stops recovering pages once the attach is aborted', async () => {
+    const abort = new AbortController()
+    const { authority, pages } = harness({
+      pageIds: ['page-a', 'page-b', 'page-c', 'page-d', 'page-e'],
+      onCommand: () => abort.abort()
+    })
+
+    await recoverUnavailableRuntimeBrowserClientPages({
+      lease: lease([]),
+      authority,
+      pages,
+      notifyWorkspace: vi.fn(),
+      signal: abort.signal
+    })
+
+    expect(authority.createClientPage).toHaveBeenCalledTimes(4)
+    expect(pages.getPage('page-e')?.placement).toMatchObject({ pageHostGeneration: 15 })
   })
 })
 
-function harness() {
+function harness(
+  options: {
+    pageIds?: readonly string[]
+    navigateFailures?: readonly string[]
+    creationFailures?: readonly string[]
+    onCommand?: () => void
+  } = {}
+) {
+  const pageIds = options.pageIds ?? ['page-a']
   const pages = new RuntimeBrowserPageRegistry()
-  pages.publishClientPage({
-    browserPageId: 'page-a',
-    workspaceId: 'workspace-a',
-    browserProfileId: 'profile-a',
-    executionHostKey: 'native:runtime-a:1',
-    placement: oldPlacement,
-    url: 'https://server-known.internal/',
-    loading: true,
-    active: true
+  const placements = new Map<string, RuntimeBrowserClientPlacement | undefined>()
+  pageIds.forEach((browserPageId, index) => {
+    const placement = Object.freeze({ ...oldPlacement, pageHostGeneration: 7 + index * 2 })
+    placements.set(browserPageId, placement)
+    pages.publishClientPage({
+      browserPageId,
+      workspaceId: 'workspace-a',
+      browserProfileId: 'profile-a',
+      executionHostKey: 'native:runtime-a:1',
+      placement,
+      url: 'https://server-known.internal/',
+      loading: true,
+      active: index === 0
+    })
   })
-  let placement: RuntimeBrowserClientPlacement | undefined = oldPlacement
-  const commands: { type: string; pageHostGeneration: number }[] = []
+  const commands: { browserPageId: string; type: string; pageHostGeneration: number }[] = []
   const authority = {
     authorityRuntimeId: 'runtime-a',
     authorityEpoch: 'epoch-a',
-    getPlacement: vi.fn(() => placement),
+    getPlacement: vi.fn((browserPageId: string) => placements.get(browserPageId)),
     beginPageRetirement: vi.fn((browserPageId: string, expected: RuntimeBrowserClientPlacement) => {
-      if (expected !== placement) {
+      if (expected !== placements.get(browserPageId)) {
         throw new Error('browser_page_placement_stale')
       }
       return { browserPageId, placement: expected }
     }),
-    completePageRetirement: vi.fn(() => {
-      placement = undefined
+    completePageRetirement: vi.fn((retirement: { browserPageId: string }) => {
+      placements.set(retirement.browserPageId, undefined)
       return true
     }),
-    createClientPage: vi.fn(async () => {
-      placement = newPlacement
-      return newPlacement
+    createClientPage: vi.fn(async (input: { browserPageId: string }) => {
+      if (options.creationFailures?.includes(input.browserPageId)) {
+        throw new Error('browser_host_page_creation_timeout')
+      }
+      const index = pageIds.indexOf(input.browserPageId)
+      const placement = Object.freeze({ ...newPlacement, pageHostGeneration: 8 + index * 2 })
+      placements.set(input.browserPageId, placement)
+      return placement
     }),
     issueClientPageCommand: vi.fn(
-      (input: { pageHostGeneration: number }, command: { type: string }) => {
-        commands.push({ type: command.type, pageHostGeneration: input.pageHostGeneration })
-        return { event: {}, result: Promise.resolve({ status: 'completed' as const }) }
+      (input: { browserPageId: string; pageHostGeneration: number }, command: { type: string }) => {
+        commands.push({
+          browserPageId: input.browserPageId,
+          type: command.type,
+          pageHostGeneration: input.pageHostGeneration
+        })
+        options.onCommand?.()
+        const failed =
+          command.type === 'navigate' && options.navigateFailures?.includes(input.browserPageId)
+        return {
+          event: {},
+          result: Promise.resolve(
+            failed
+              ? { status: 'failed' as const, errorCode: 'browser_client_page_navigation_failed' }
+              : { status: 'completed' as const }
+          )
+        }
       }
     )
   }

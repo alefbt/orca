@@ -10,6 +10,7 @@ import {
 import { getBrowserHostLeaseRegistry } from '../../browser-host-lease-registry-instance'
 import { getRuntimeBrowserPageRegistry } from '../../runtime-browser-page-registry'
 import { recoverUnavailableRuntimeBrowserClientPages } from '../../runtime-browser-client-page-recovery'
+import { releaseRuntimeBrowserClientPageRecord } from '../../runtime-browser-client-page-release'
 import { defineMethod, defineStreamingMethod, type RpcAnyMethod } from '../core'
 
 export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
@@ -102,7 +103,10 @@ export const BROWSER_CLIENT_HOST_METHODS: RpcAnyMethod[] = [
           lease: handle.lease,
           authority: registry,
           pages: getRuntimeBrowserPageRegistry(runtime),
-          notifyWorkspace: (workspaceId) => runtime.notifyMobileSessionTabsChanged(workspaceId)
+          notifyWorkspace: (workspaceId) => runtime.notifyMobileSessionTabsChanged(workspaceId),
+          releaseUnrecoverablePage: (page) =>
+            releaseRuntimeBrowserClientPageRecord(runtime, page.browserPageId, page.placement),
+          ...(signal ? { signal } : {})
         })
         const reason = await Promise.race([
           handle.whenFenced,

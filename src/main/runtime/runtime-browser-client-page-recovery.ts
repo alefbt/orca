@@ -44,6 +44,9 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
   authority: RecoveryAuthority
   pages: RuntimeBrowserPageRegistry
   notifyWorkspace(workspaceId: string): void
+  /** Drops a page whose placement recovery destroyed without replacing it. */
+  releaseUnrecoverablePage?: (page: RuntimeBrowserClientPage) => void
+  signal?: AbortSignal
 }): Promise<void> {
   const inventory = options.lease.pageInventory
   if (
@@ -62,9 +65,35 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
         page.placement.browserHostGeneration === options.lease.browserHostGeneration &&
         !isActiveExactPage(page, inventoryByPageId.get(page.browserPageId), options.lease)
     )
-  await mapWithConcurrency(pages, MAX_RECOVERY_CONCURRENCY, async (page) => {
-    await recoverPage(page, inventoryByPageId.get(page.browserPageId), options)
-  })
+  await mapWithConcurrency(
+    pages,
+    MAX_RECOVERY_CONCURRENCY,
+    async (page) => {
+      try {
+        await recoverPage(page, inventoryByPageId.get(page.browserPageId), options)
+      } catch (error) {
+        // Why: recovery failures are page-scoped (a refused URL, a creation timeout). Rejecting
+        // here aborts the whole attach and fences the lease, taking every healthy page with it.
+        console.warn('[browser-host-lease] client page recovery failed:', {
+          browserPageId: page.browserPageId,
+          error
+        })
+        releaseUnhostablePage(page, options)
+      }
+    },
+    options.signal
+  )
+}
+
+/** Retires a page left with no placement at all; anything still placed can retry on a later attach. */
+function releaseUnhostablePage(
+  page: RuntimeBrowserClientPage,
+  options: Parameters<typeof recoverUnavailableRuntimeBrowserClientPages>[0]
+): void {
+  if (options.authority.getPlacement(page.browserPageId)) {
+    return
+  }
+  options.releaseUnrecoverablePage?.(page)
 }
 
 async function recoverPage(
@@ -217,11 +246,12 @@ function assertInventoryAuthority(
 async function mapWithConcurrency<T>(
   values: readonly T[],
   concurrency: number,
-  operation: (value: T) => Promise<void>
+  operation: (value: T) => Promise<void>,
+  signal?: AbortSignal
 ): Promise<void> {
   let index = 0
   const worker = async (): Promise<void> => {
-    while (index < values.length) {
+    while (index < values.length && !signal?.aborted) {
       const value = values[index]
       index += 1
       if (value !== undefined) {
