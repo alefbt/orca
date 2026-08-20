@@ -88,7 +88,7 @@ const browserClientHosts =
         onClosing: releaseDownloadRouting,
         initialInput: input,
         createRoutes: (next, authority) =>
-          createNetworkRoutes(next.pairing, authority, next.storageScope),
+          createNetworkRoutes(next.pairing, authority, next.storageScope, input.environmentId),
         createExecutor: (next, { retainNetworkRoute, onPageUnavailable }) => {
           executor = new BrowserClientPageCommandExecutor({
             orcaProfileId: next.orcaProfileId,
@@ -237,7 +237,8 @@ export function shutdownPairedRuntimeBrowserClientHosts(): Promise<void> {
 function createNetworkRoutes(
   pairing: PairingOffer,
   authority: BrowserClientHostLeaseAuthority,
-  authorityStorageKey: string
+  authorityStorageKey: string,
+  environmentId: string
 ): BrowserClientNetworkRouteRegistry {
   return new BrowserClientNetworkRouteRegistry({
     authority,
@@ -248,7 +249,10 @@ function createNetworkRoutes(
         lease: authority,
         executionHost,
         executionHostRevision: executionHost.kind === 'native' ? executionHost.revision : 0,
-        onError: reportBrowserClientHostError
+        onError: reportBrowserClientHostError,
+        // Why: a route that stayed dark after bounded rebuilds leaves every page in the
+        // environment black-holing requests, so retire the host instead of warning forever.
+        onUnavailable: (error) => retireFailedEnvironmentHost(environmentId, error)
       })
   })
 }
