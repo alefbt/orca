@@ -83,6 +83,61 @@ export function browserTabCreateClientPageStartsActive(activate: boolean | undef
   return activate !== false
 }
 
+// The surfaces browserTabSwitch can land on. `bridge` covers renderer and offscreen alike: both
+// are switched by AgentBrowserBridge.tabSwitch, which already moves bridge-side active state.
+export type BrowserTabSwitchPlacementKind = 'client' | 'bridge'
+
+export const BROWSER_TAB_SWITCH_PLACEMENT_KINDS = [
+  'client',
+  'bridge'
+] as const satisfies readonly BrowserTabSwitchPlacementKind[]
+
+export type BrowserTabSwitchPublication = {
+  placementKind: BrowserTabSwitchPlacementKind
+  browserPageId: string
+  worktreeId?: string
+  focus?: boolean
+}
+
+export const BROWSER_TAB_SWITCH_PUBLICATION_RULES: Record<
+  BrowserTabSwitchPlacementKind,
+  { marksSessionTabFocus: boolean; notifiesSessionTabsChanged: boolean }
+> = {
+  client: {
+    marksSessionTabFocus: true,
+    // Why: the page registry's active flag moved, and that flag is only visible to clients
+    // through a republished snapshot — announce it whether or not the switch took focus.
+    notifiesSessionTabsChanged: true
+  },
+  bridge: {
+    marksSessionTabFocus: true,
+    // Why: nothing in the snapshot changes for an unfocused bridge switch, and the focused case
+    // republishes through the focus marker itself.
+    notifiesSessionTabsChanged: false
+  }
+}
+
+// Why: `focus` is the switch's opt-in user intent, the exact analogue of create's `activate` —
+// an agent or CLI switch without it must not yank a connected client onto the tab.
+export function browserTabSwitchTakesFocus(focus: boolean | undefined): boolean {
+  return focus === true
+}
+
+// Why: an explicit switch moved the session's active tab just as an activating create does, so
+// both converge here rather than letting only create reach the session-tab snapshot.
+export function publishSwitchedBrowserSessionTab(
+  host: BrowserTabCreatePublicationHost,
+  publication: BrowserTabSwitchPublication
+): void {
+  const rules = BROWSER_TAB_SWITCH_PUBLICATION_RULES[publication.placementKind]
+  if (rules.notifiesSessionTabsChanged && publication.worktreeId !== undefined) {
+    host.notifyHeadlessBrowserSessionTabsChanged?.(publication.worktreeId)
+  }
+  if (rules.marksSessionTabFocus && browserTabSwitchTakesFocus(publication.focus)) {
+    host.markHeadlessBrowserSessionTabActive?.(publication.worktreeId, publication.browserPageId)
+  }
+}
+
 export function publishCreatedBrowserSessionTab(
   host: BrowserTabCreatePublicationHost,
   publication: BrowserTabCreatePublication

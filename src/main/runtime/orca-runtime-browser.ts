@@ -90,7 +90,8 @@ import {
 } from './browser-screencast-ghost-subscriber-eviction'
 import {
   browserTabCreateClientPageStartsActive,
-  publishCreatedBrowserSessionTab
+  publishCreatedBrowserSessionTab,
+  publishSwitchedBrowserSessionTab
 } from './browser-tab-create-publication'
 import type { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
 import {
@@ -849,7 +850,12 @@ export class RuntimeBrowserCommands {
       this.host
         .getRuntimeBrowserPageRegistry()
         .activatePage(clientPage.browserPageId, clientPage.placement)
-      this.host.notifyHeadlessBrowserSessionTabsChanged?.(clientPage.workspaceId)
+      publishSwitchedBrowserSessionTab(this.host, {
+        placementKind: 'client',
+        browserPageId: clientPage.browserPageId,
+        worktreeId: clientPage.workspaceId,
+        focus: params.focus
+      })
       return { switched: switchedIndex, browserPageId: clientPage.browserPageId }
     }
     const bridge = this.requireAgentBrowserBridge()
@@ -864,10 +870,16 @@ export class RuntimeBrowserCommands {
     if (worktreeId) {
       this.host.getRuntimeBrowserPageRegistry().deactivateWorkspace(worktreeId)
     }
+    // Why: scope focus to the tab's owning worktree; the renderer never yanks the user across worktrees on this signal (see focusBrowserTabInWorktree).
+    const focusWorktreeId =
+      worktreeId ?? browserManager.getWorktreeIdForTab(result.browserPageId) ?? undefined
+    publishSwitchedBrowserSessionTab(this.host, {
+      placementKind: 'bridge',
+      browserPageId: result.browserPageId,
+      worktreeId: focusWorktreeId,
+      focus: params.focus
+    })
     if (params.focus) {
-      // Why: scope focus to the tab's owning worktree; the renderer never yanks the user across worktrees on this signal (see focusBrowserTabInWorktree).
-      const focusWorktreeId =
-        worktreeId ?? browserManager.getWorktreeIdForTab(result.browserPageId) ?? undefined
       this.notifyRendererBrowserPaneFocus(focusWorktreeId, result.browserPageId)
     }
     return { ...result, switched: switchedIndex }

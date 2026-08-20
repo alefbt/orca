@@ -9,11 +9,16 @@ import { RuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 import {
   BROWSER_TAB_CREATE_PLACEMENT_KINDS,
   BROWSER_TAB_CREATE_PUBLICATION_RULES,
+  BROWSER_TAB_SWITCH_PLACEMENT_KINDS,
+  BROWSER_TAB_SWITCH_PUBLICATION_RULES,
   browserTabCreateClientPageStartsActive,
   browserTabCreateTakesFocus,
+  browserTabSwitchTakesFocus,
   publishCreatedBrowserSessionTab,
+  publishSwitchedBrowserSessionTab,
   type BrowserTabCreatePlacementKind,
-  type BrowserTabCreatePublicationHost
+  type BrowserTabCreatePublicationHost,
+  type BrowserTabSwitchPlacementKind
 } from './browser-tab-create-publication'
 
 const { ipcMainOnMock, waitForTabRegistrationMock } = vi.hoisted(() => ({
@@ -393,9 +398,238 @@ describe('browser tab-create placement census', () => {
   it('names every placement kind the command adapter can select', () => {
     const source = browserCommandsSource()
     const selected = new Set<BrowserTabCreatePlacementKind>()
-    for (const [, placementKind] of source.matchAll(/placementKind: '([a-z]+)'/g)) {
+    for (const [, placementKind] of source.matchAll(
+      /publishCreatedBrowserSessionTab\(this\.host, \{\s*placementKind: '([a-z]+)'/g
+    )) {
       selected.add(placementKind as BrowserTabCreatePlacementKind)
     }
     expect([...selected].sort()).toEqual([...BROWSER_TAB_CREATE_PLACEMENT_KINDS].sort())
+  })
+})
+
+describe('publishSwitchedBrowserSessionTab', () => {
+  it('declares a publication rule for every switch placement kind', () => {
+    expect(Object.keys(BROWSER_TAB_SWITCH_PUBLICATION_RULES).sort()).toEqual(
+      [...BROWSER_TAB_SWITCH_PLACEMENT_KINDS].sort()
+    )
+  })
+
+  // Why: the cases below read their expectation off this table, so the table needs a literal pin.
+  it('pins the bookkeeping each switch placement owns', () => {
+    expect(BROWSER_TAB_SWITCH_PUBLICATION_RULES).toEqual({
+      client: { marksSessionTabFocus: true, notifiesSessionTabsChanged: true },
+      bridge: { marksSessionTabFocus: true, notifiesSessionTabsChanged: false }
+    })
+  })
+
+  it('moves the session active tab only when the switch carries focus', () => {
+    for (const placementKind of BROWSER_TAB_SWITCH_PLACEMENT_KINDS) {
+      const focused = createPublicationHost()
+      publishSwitchedBrowserSessionTab(focused.host, {
+        placementKind,
+        browserPageId: 'page-1',
+        worktreeId: 'wt-1',
+        focus: true
+      })
+      expect(focused.markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-1')
+
+      for (const focus of [false, undefined]) {
+        const unfocused = createPublicationHost()
+        publishSwitchedBrowserSessionTab(unfocused.host, {
+          placementKind,
+          browserPageId: 'page-1',
+          worktreeId: 'wt-1',
+          focus
+        })
+        expect(
+          unfocused.markHeadlessBrowserSessionTabActive,
+          `${placementKind} switch with focus=${focus} must not yank a connected client`
+        ).not.toHaveBeenCalled()
+      }
+    }
+  })
+
+  it('announces a client switch whether or not it took focus, and never a bridge switch', () => {
+    for (const focus of [true, false, undefined]) {
+      const client = createPublicationHost()
+      publishSwitchedBrowserSessionTab(client.host, {
+        placementKind: 'client',
+        browserPageId: 'page-1',
+        worktreeId: 'wt-1',
+        focus
+      })
+      expect(client.notifyHeadlessBrowserSessionTabsChanged).toHaveBeenCalledWith('wt-1')
+
+      const bridge = createPublicationHost()
+      publishSwitchedBrowserSessionTab(bridge.host, {
+        placementKind: 'bridge',
+        browserPageId: 'page-1',
+        worktreeId: 'wt-1',
+        focus
+      })
+      expect(bridge.notifyHeadlessBrowserSessionTabsChanged).not.toHaveBeenCalled()
+    }
+  })
+
+  it('skips the worktree-scoped announcement for an unscoped switch', () => {
+    const { host, notifyHeadlessBrowserSessionTabsChanged } = createPublicationHost()
+    publishSwitchedBrowserSessionTab(host, {
+      placementKind: 'client',
+      browserPageId: 'page-1',
+      focus: true
+    })
+    expect(notifyHeadlessBrowserSessionTabsChanged).not.toHaveBeenCalled()
+  })
+
+  it('tolerates a host with no session-tab surface', () => {
+    expect(() =>
+      publishSwitchedBrowserSessionTab(
+        { getAgentBrowserBridge: () => null } as BrowserTabCreatePublicationHost,
+        { placementKind: 'bridge', browserPageId: 'page-1', worktreeId: 'wt-1', focus: true }
+      )
+    ).not.toThrow()
+  })
+})
+
+describe('browser tab-switch focus rule', () => {
+  it('takes focus only on an explicit focus flag', () => {
+    expect(browserTabSwitchTakesFocus(true)).toBe(true)
+    expect(browserTabSwitchTakesFocus(false)).toBe(false)
+    expect(browserTabSwitchTakesFocus(undefined)).toBe(false)
+  })
+
+  // Why: switch and create are the two ways a tab becomes the session's active tab; if their
+  // focus gates diverged, the same user intent would move the snapshot on one path only.
+  it('agrees with the create focus rule', () => {
+    for (const intent of [true, false, undefined]) {
+      expect(browserTabSwitchTakesFocus(intent)).toBe(browserTabCreateTakesFocus(intent))
+    }
+  })
+})
+
+describe('browser tab-switch placement census', () => {
+  it('routes every switch branch through the shared publication exactly once', () => {
+    const source = browserCommandsSource()
+    for (const placementKind of BROWSER_TAB_SWITCH_PLACEMENT_KINDS) {
+      const routed = source.match(
+        new RegExp(
+          `publishSwitchedBrowserSessionTab\\(this\\.host, \\{\\s*placementKind: '${placementKind}'`,
+          'g'
+        )
+      )
+      expect(routed, `${placementKind} switch must publish through the shared seam`).toHaveLength(1)
+    }
+    expect(source.match(/publishSwitchedBrowserSessionTab\(/g)).toHaveLength(
+      BROWSER_TAB_SWITCH_PLACEMENT_KINDS.length
+    )
+  })
+
+  it('names every switch placement kind the command adapter can select', () => {
+    const source = browserCommandsSource()
+    const selected = new Set<BrowserTabSwitchPlacementKind>()
+    for (const [, placementKind] of source.matchAll(
+      /publishSwitchedBrowserSessionTab\(this\.host, \{\s*placementKind: '([a-z]+)'/g
+    )) {
+      selected.add(placementKind as BrowserTabSwitchPlacementKind)
+    }
+    expect([...selected].sort()).toEqual([...BROWSER_TAB_SWITCH_PLACEMENT_KINDS].sort())
+  })
+
+  // Why: the rule-driven cases read their expectation off the table, so each branch also needs
+  // its real bookkeeping observed through browserTabSwitch itself.
+  describe('through browserTabSwitch', () => {
+    function createClientSwitchHost(overrides: Partial<RuntimeBrowserCommandHost>): {
+      host: RuntimeBrowserCommandHost
+      registry: RuntimeBrowserPageRegistry
+    } {
+      const registry = new RuntimeBrowserPageRegistry()
+      for (const [browserPageId, active] of [
+        ['page-a', true],
+        ['page-b', false]
+      ] as const) {
+        registry.publishClientPage({
+          browserPageId,
+          workspaceId: 'wt-1',
+          browserProfileId: 'default',
+          executionHostKey: 'native:runtime-a:7',
+          placement: {
+            kind: 'client',
+            browserHostClientId: 'host-a',
+            browserHostGeneration: 3,
+            pageHostGeneration: 9
+          },
+          url: 'https://client.test/',
+          loading: false,
+          active
+        })
+      }
+      return {
+        host: createCommandHost({
+          getAgentBrowserBridge: () => null,
+          getRuntimeBrowserPageRegistry: () => registry,
+          ...overrides
+        }),
+        registry
+      }
+    }
+
+    it('marks a focused client switch active and leaves an unfocused one alone', async () => {
+      const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+      const markHeadlessBrowserSessionTabActive = vi.fn()
+      const notifyHeadlessBrowserSessionTabsChanged = vi.fn()
+      const { host, registry } = createClientSwitchHost({
+        markHeadlessBrowserSessionTabActive,
+        notifyHeadlessBrowserSessionTabsChanged
+      })
+      const commands = new RuntimeBrowserCommands(host)
+
+      await expect(
+        commands.browserTabSwitch({ worktree: 'id:wt-1', page: 'page-b', focus: true })
+      ).resolves.toEqual({ switched: 1, browserPageId: 'page-b' })
+      expect(registry.getPage('page-b')?.active).toBe(true)
+      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-b')
+      expect(notifyHeadlessBrowserSessionTabsChanged).toHaveBeenCalledWith('wt-1')
+
+      markHeadlessBrowserSessionTabActive.mockClear()
+      notifyHeadlessBrowserSessionTabsChanged.mockClear()
+      await commands.browserTabSwitch({ worktree: 'id:wt-1', page: 'page-a' })
+      // Why: an agent or CLI switch without --focus must not yank a connected client.
+      expect(markHeadlessBrowserSessionTabActive).not.toHaveBeenCalled()
+      expect(registry.getPage('page-a')?.active).toBe(true)
+      expect(notifyHeadlessBrowserSessionTabsChanged).toHaveBeenCalledWith('wt-1')
+    })
+
+    it('marks a focused bridge switch active and leaves an unfocused one alone', async () => {
+      const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+      const markHeadlessBrowserSessionTabActive = vi.fn()
+      const bridge = {
+        getRegisteredTabs: vi.fn(() => new Map([['page-server', 100]])),
+        tabList: vi.fn(() => ({
+          tabs: [
+            {
+              browserPageId: 'page-server',
+              index: 0,
+              url: 'about:blank',
+              title: 'Server page',
+              active: true
+            }
+          ]
+        })),
+        tabSwitch: vi.fn(async () => ({ switched: 0, browserPageId: 'page-server' }))
+      } as unknown as AgentBrowserBridge
+      const commands = new RuntimeBrowserCommands(
+        createCommandHost({
+          getAgentBrowserBridge: () => bridge,
+          markHeadlessBrowserSessionTabActive
+        })
+      )
+
+      await commands.browserTabSwitch({ worktree: 'id:wt-1', page: 'page-server', focus: true })
+      expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith('wt-1', 'page-server')
+
+      markHeadlessBrowserSessionTabActive.mockClear()
+      await commands.browserTabSwitch({ worktree: 'id:wt-1', page: 'page-server' })
+      expect(markHeadlessBrowserSessionTabActive).not.toHaveBeenCalled()
+    })
   })
 })
