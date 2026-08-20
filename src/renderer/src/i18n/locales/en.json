@@ -67,7 +67,8 @@
       "forwardingBlockedTitle": "The SSH server blocks browser traffic",
       "sshUnavailableTitle": "SSH connection unavailable",
       "forwardingBlockedDescription": "This server refuses TCP forwarding (often “AllowTcpForwarding no” in its sshd config), which browsing through it requires. Ask its administrator to allow forwarding, or browse from this device instead.",
-      "sshUnavailableDescription": "Pages in this workspace browse through its SSH host, and that connection isn't available right now. Reconnect the host, then retry."
+      "sshUnavailableDescription": "Pages in this workspace browse through its SSH host, and that connection isn't available right now. Reconnect the host, then retry.",
+      "showDetails": "Show details"
     }
   },
   "githubChecks": {

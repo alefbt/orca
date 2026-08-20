@@ -241,18 +241,18 @@ describe('LocalSshBrowserRoute', () => {
     expect(first.port).not.toBe(0)
   })
 
-  it('classifies forwarding probes by the SSH refusal reason', async () => {
-    const behaviors = new Map<string, string>()
+  it('classifies forwarding probes by the wire reason code, never by scary wording', async () => {
+    let failure: (Error & { reason?: number }) | null = null
     const route = new LocalSshBrowserRoute('target-probe', {
       resolveExecutionRoute: async () => {
         const executionRoute = fakeExecutionRoute('route-probe')
         const originalConnect = executionRoute.connect
         executionRoute.connect = (target) => {
-          const reason = behaviors.get('reason')
-          if (reason !== undefined) {
+          if (failure) {
             const socket = new FakeTunnelSocket('never-connect')
+            const error = failure
             queueMicrotask(() => {
-              socket.emit('error', new Error(reason))
+              socket.emit('error', error)
             })
             return socket
           }
@@ -265,12 +265,27 @@ describe('LocalSshBrowserRoute', () => {
     routes.push(route)
     await route.listen()
 
-    behaviors.set('reason', 'administratively prohibited: open failed')
+    const withReason = (message: string, reason?: number): Error & { reason?: number } => {
+      const error = new Error(message) as Error & { reason?: number }
+      if (reason !== undefined) {
+        error.reason = reason
+      }
+      return error
+    }
+
+    // RFC 4254 reason 1 = ADMINISTRATIVELY_PROHIBITED, regardless of wording.
+    failure = withReason('(SSH) Channel open failure: open failed', 1)
     expect(await route.probeForwarding(500)).toBe('forwarding-blocked')
-    // Why: a TCP-level refusal proves the channel was ALLOWED — forwarding works.
-    behaviors.set('reason', 'connect failed: Connection refused')
+    // Why (false-positive pin): CONNECT_FAILED with hostile wording must read
+    // as ok — a firewall's "denied" text proves the CHANNEL was allowed.
+    failure = withReason('(SSH) Channel open failure: connection denied by firewall', 2)
     expect(await route.probeForwarding(500)).toBe('ok')
-    behaviors.delete('reason')
+    // No wire code: only the canonical OpenSSH phrase classifies as blocked.
+    failure = withReason('administratively prohibited: open failed')
+    expect(await route.probeForwarding(500)).toBe('forwarding-blocked')
+    failure = withReason('open forbidden: access denied, not allowed')
+    expect(await route.probeForwarding(500)).toBe('ok')
+    failure = null
     expect(await route.probeForwarding(500)).toBe('ok')
   })
 

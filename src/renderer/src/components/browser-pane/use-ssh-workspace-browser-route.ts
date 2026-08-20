@@ -49,6 +49,9 @@ export function useSshWorkspaceBrowserRoute(
   const disabledTargetIds = useAppStore(
     (s) => s.settings?.browserSshWorkspaceRoutingDisabledTargetIds
   )
+  const probeSkippedTargetIds = useAppStore(
+    (s) => s.settings?.browserSshWorkspaceRoutingProbeSkippedTargetIds
+  )
   const updateSettings = useAppStore((s) => s.updateSettings)
   const parsed = parseExecutionHostId(executionHostId)
   // Why: runtime-owned ephemeral targets belong to a paired runtime's own machinery.
@@ -65,6 +68,10 @@ export function useSshWorkspaceBrowserRoute(
     targetId ? { kind: 'preparing' } : { kind: 'unrouted' }
   )
 
+  // Why: a persisted "Try anyway" means the user vouched for this host once
+  // (e.g. PermitOpen allows their sites while the loopback probe is refused);
+  // re-nagging every launch would train them to distrust the card.
+  const skipProbe = attempt.skipProbe || probeSkippedTargetIds?.includes(targetId ?? '') === true
   useEffect(() => {
     if (!targetId) {
       setState({ kind: 'unrouted' })
@@ -76,7 +83,7 @@ export function useSshWorkspaceBrowserRoute(
       .prepareSshWorkspacePartition({
         targetId,
         browserProfileId,
-        ...(attempt.skipProbe ? { skipProbe: true } : {})
+        ...(skipProbe ? { skipProbe: true } : {})
       })
       .then((result) => {
         if (!cancelled) {
@@ -96,7 +103,7 @@ export function useSshWorkspaceBrowserRoute(
     return () => {
       cancelled = true
     }
-  }, [targetId, browserProfileId, attempt])
+  }, [targetId, browserProfileId, attempt, skipProbe])
 
   // Why (review P1-1): `state` lags one commit behind a targetId transition on
   // an already-mounted instance; returning stale 'unrouted' (or a stale
@@ -112,7 +119,18 @@ export function useSshWorkspaceBrowserRoute(
     state: effectiveState,
     targetId: sshTargetId,
     retry: () => setAttempt((current) => ({ count: current.count + 1, skipProbe: false })),
-    tryWithoutProbe: () => setAttempt((current) => ({ count: current.count + 1, skipProbe: true })),
+    tryWithoutProbe: () => {
+      // Persist the override so this host isn't re-nagged on every launch.
+      if (sshTargetId && probeSkippedTargetIds?.includes(sshTargetId) !== true) {
+        updateSettings({
+          browserSshWorkspaceRoutingProbeSkippedTargetIds: [
+            ...(probeSkippedTargetIds ?? []),
+            sshTargetId
+          ]
+        })
+      }
+      setAttempt((current) => ({ count: current.count + 1, skipProbe: true }))
+    },
     browseFromThisDevice: () => {
       if (!sshTargetId) {
         return

@@ -66,9 +66,14 @@ export function SshRoutedBrowserPageGate({
               {errorDescription(state.errorKind)}
             </div>
             {state.errorKind === 'unknown' ? (
-              <div className="break-all text-xs leading-5 text-muted-foreground">
-                {state.message}
-              </div>
+              // Why: raw error strings are for bug reports, not users — present
+              // but collapsed, so the card stays plain-language first.
+              <details className="max-w-full text-xs leading-5 text-muted-foreground">
+                <summary className="cursor-pointer select-none">
+                  {translate('browser.sshRoute.showDetails', 'Show details')}
+                </summary>
+                <div className="mt-1 break-words">{state.message}</div>
+              </details>
             ) : null}
             <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
               <Button type="button" variant="outline" size="sm" onClick={retry}>

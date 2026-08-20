@@ -62,10 +62,11 @@ export class LocalSshBrowserRoute {
   /**
    * Classifies whether the SSH server permits TCP forwarding by dialing a
    * loopback port that is closed on any sane host: a channel-level refusal
-   * proves forwarding is allowed, while sshd's "administratively prohibited"
-   * reason (AllowTcpForwarding no / PermitOpen) proves it is not. Unknown
-   * outcomes read as ok — the probe exists to explain failures, never to
-   * block a setup that might work.
+   * proves forwarding is allowed, while the wire's ADMINISTRATIVELY_PROHIBITED
+   * reason (AllowTcpForwarding no / PermitOpen) proves it is not. Anything
+   * else — timeout, refused, unknown wording, non-ssh2 transports — reads as
+   * ok: the probe exists to explain failures, never to block a setup that
+   * might work, so misclassification must only ever be a missed explanation.
    */
   async probeForwarding(
     timeoutMs = 4_000
@@ -91,11 +92,7 @@ export class LocalSshBrowserRoute {
       const timeout = setTimeout(() => settle('ok'), timeoutMs)
       socket.on('connect', () => settle('ok'))
       socket.on('error', (error) =>
-        settle(
-          /administratively|prohibit|forbidden|not allowed|denied/i.test(error.message)
-            ? 'forwarding-blocked'
-            : 'ok'
-        )
+        settle(isAdministrativelyProhibited(error) ? 'forwarding-blocked' : 'ok')
       )
       socket.on('close', () => settle('ok'))
     })
@@ -152,6 +149,24 @@ export class LocalSshBrowserRoute {
     })
     return route
   }
+}
+
+/** RFC 4254 SSH_OPEN_ADMINISTRATIVELY_PROHIBITED — what sshd sends for AllowTcpForwarding no / PermitOpen. */
+const SSH_OPEN_ADMINISTRATIVELY_PROHIBITED = 1
+
+/**
+ * Trusts the wire's numeric reason code first (ssh2 attaches it as `reason`;
+ * every RFC 4254 server sends it, wording-independent). The exact OpenSSH
+ * phrase is a fallback for errors that lost the code in transit. Broad word
+ * matching ("denied", "forbidden") is deliberately absent — a firewall's
+ * connect-failure text must never read as a policy block.
+ */
+function isAdministrativelyProhibited(error: Error): boolean {
+  const reason = (error as Error & { reason?: unknown }).reason
+  if (typeof reason === 'number') {
+    return reason === SSH_OPEN_ADMINISTRATIVELY_PROHIBITED
+  }
+  return /administratively prohibited/i.test(error.message)
 }
 
 const routesByTargetId = new Map<string, LocalSshBrowserRoute>()
