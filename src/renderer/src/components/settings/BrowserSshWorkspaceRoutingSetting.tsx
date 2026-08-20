@@ -105,7 +105,7 @@ export function BrowserSshWorkspaceRoutingSetting({
                   })
                 }
               >
-                {translate('settings.browser.sshWorkspaceRouting.enableHost', 'Route again')}
+                {translate('settings.browser.sshWorkspaceRouting.useHost', 'Use SSH host')}
               </Button>
             </div>
           ))}
