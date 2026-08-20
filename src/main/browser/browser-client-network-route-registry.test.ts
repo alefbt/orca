@@ -368,7 +368,11 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     closing.reconnect.mockRejectedValue(new Error('Browser network route is closed'))
     const replacement = createRoute(Promise.resolve({ host: '127.0.0.1', port: 43124 }))
     const routeFactory = vi.fn(() => (routeFactory.mock.calls.length > 1 ? replacement : closing))
-    const registry = new BrowserClientNetworkRouteRegistry({ authority, createRoute: routeFactory })
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      authorityStorageKey,
+      createRoute: routeFactory
+    })
     const key = browserNetworkExecutionHostKey({
       kind: 'ssh',
       targetId: 'target-a',
@@ -394,6 +398,7 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     route.close.mockImplementation(() => teardown.promise)
     const registry = new BrowserClientNetworkRouteRegistry({
       authority,
+      authorityStorageKey,
       createRoute: vi.fn(() => route)
     })
     const key = browserNetworkExecutionHostKey({

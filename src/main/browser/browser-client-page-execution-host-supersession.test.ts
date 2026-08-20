@@ -5,6 +5,7 @@ import {
   createCommand,
   createLifecycleClaim
 } from './browser-client-page-command-executor-test-harness'
+import { createBrowserRoutePartitionBindingStoreFake } from './browser-route-partition-binding-store-fake'
 import {
   BrowserRouteSessionRegistry,
   type BrowserRouteElectronSession
@@ -33,7 +34,6 @@ function createHarness() {
   const releasedRoutes: string[] = []
   const proxyRulesByPartition = new Map<string, string>()
   const sessionsByPartition = new Map<string, BrowserRouteElectronSession>()
-  const bindings = new Map<string, string>()
   let nextWebContentsId = 40
 
   const getSession = (partition: string): BrowserRouteElectronSession => {
@@ -65,21 +65,18 @@ function createHarness() {
     setupPolicies: vi.fn(),
     clearPolicies: vi.fn(),
     retirePageAuthority: vi.fn(() => true),
-    bindingStore: {
-      get: vi.fn((partition) => bindings.get(partition) ?? null),
-      set: vi.fn((partition, fingerprint) => {
-        bindings.set(partition, fingerprint)
-      })
-    }
+    bindingStore: createBrowserRoutePartitionBindingStoreFake()
   })
 
   const dependencies = {
     orcaProfileId: 'orca-profile-a',
     authorityConnectionIdentity: 'authority-record-a',
+    legacyAuthorityConnectionIdentity: 'legacy-authority-record-a',
     storageScope: 'a'.repeat(64),
     retainNetworkRoute: vi.fn(async (executionHostKey: string) => ({
       key: executionHostKey,
       executionHostIdentity: storageIdentityByKey[executionHostKey],
+      legacyExecutionHostIdentity: `legacy-${storageIdentityByKey[executionHostKey]}`,
       proxyEndpoint: { host: '127.0.0.1' as const, port: proxyPortByKey[executionHostKey] },
       release: vi.fn(() => {
         releasedRoutes.push(executionHostKey)
