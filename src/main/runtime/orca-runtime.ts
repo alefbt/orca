@@ -654,6 +654,7 @@ import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
 import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry-instance'
 import { getRuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
+import { closeClientHostedBrowserPagesForWorktree } from './worktree-browser-client-page-close'
 import {
   routeRuntimeBrowserClientAutomation,
   type ClientHostedBrowserRpcRoute
@@ -26742,6 +26743,7 @@ export class OrcaRuntimeService {
       advertisedUrlWatcher.forgetWorktree(worktreeId)
       deleteWorktreeHistoryDir(worktreeId)
       this.closeHeadlessBrowserPagesForWorktree(worktreeId)
+      closeClientHostedBrowserPagesForWorktree(this, worktreeId)
     }
   }
 
