@@ -1,18 +1,11 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Globe, Loader2, RefreshCw } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Globe } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
-import { useAppStore } from '@/store'
 import type {
   BrowserLoadError,
   BrowserPage as BrowserPageState
 } from '../../../../shared/browser-workspace-types'
-import {
-  normalizeBrowserNavigationUrl,
-  redactKagiSessionToken,
-  toHttpsRecoveryUrl
-} from '../../../../shared/browser-url'
-import { ORCA_BROWSER_BLANK_URL } from '../../../../shared/constants'
+import { redactKagiSessionToken, toHttpsRecoveryUrl } from '../../../../shared/browser-url'
 import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
 import {
   createBrowserClientPageMetadataPublisher,
@@ -25,9 +18,16 @@ import {
   ReopenBrowserPageOnServerButton,
   reopenOnServerCaveat
 } from './ReopenBrowserPageOnServerButton'
-import BrowserAddressBar from './assemble-chrome/BrowserAddressBar'
+import { BrowserNavigationControlRow } from './assemble-chrome/browser-navigation-control-row'
 import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overlay'
-import type { BrowserPageUrlSetter, BrowserTabPageState } from './describe-page/browser-page-types'
+import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-bar-navigation'
+import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
+import { toDisplayUrl } from './describe-page/browser-page-url-display'
+import type {
+  BrowserPageFailLoadEvent,
+  BrowserPageUrlSetter,
+  BrowserTabPageState
+} from './describe-page/browser-page-types'
 
 export function ClientHostedBrowserPagePane({
   browserTab,
@@ -117,23 +117,11 @@ export function ClientHostedBrowserPagePane({
       publisher.publish(readClientPageMetadata(webview, undefined, true))
     }
     const onFailLoad = (event: Event): void => {
-      const failure = event as Event & {
-        errorCode?: number
-        errorDescription?: string
-        validatedURL?: string
-        isMainFrame?: boolean
-      }
-      // Why: Chromium reports redirect/cancel races as ERR_ABORTED (-3) even when the
-      // replacement navigation succeeds; subframe failures never blank the page.
-      if (failure.isMainFrame === false || failure.errorCode === -3) {
+      const loadError = resolveBrowserWebviewLoadFailure(event as BrowserPageFailLoadEvent, {
+        fallbackUrl: webview.getURL()
+      })
+      if (!loadError) {
         return
-      }
-      const loadError = {
-        code: failure.errorCode ?? 0,
-        description: failure.errorDescription || 'Navigation failed.',
-        validatedUrl: redactKagiSessionToken(
-          failure.validatedURL || webview.getURL() || 'about:blank'
-        )
       }
       activeLoadFailureRef.current = loadError
       updatePageStateFromGuest(browserTab.id, { loading: false, loadError })
@@ -178,76 +166,41 @@ export function ClientHostedBrowserPagePane({
 
   const navigateToUrl = useCallback(
     (value: string) => {
-      const { browserDefaultSearchEngine, browserKagiSessionLink } = useAppStore.getState()
-      // Why: the search-engine argument opts into search fallback; without it typed
-      // queries parse as hosts ("google maps" -> https://google%20maps/).
-      const nextUrl = normalizeBrowserNavigationUrl(value, browserDefaultSearchEngine, {
-        kagiSessionLink: browserKagiSessionLink
-      })
-      const webview = webviewRef.current
-      if (!nextUrl) {
-        onUpdatePageState(browserTab.id, {
-          loadError: {
-            code: 0,
-            description: 'Enter a valid http(s) or localhost URL.',
-            validatedUrl: redactKagiSessionToken(value.trim()) || 'about:blank'
-          }
-        })
+      const submission = resolveBrowserAddressBarSubmission(value)
+      if (submission.status === 'invalid') {
+        onUpdatePageState(browserTab.id, { loadError: submission.loadError })
         return
       }
+      const webview = webviewRef.current
       if (!webview) {
         return
       }
       activeLoadFailureRef.current = null
-      setAddressBarValue(toDisplayUrl(nextUrl))
+      setAddressBarValue(toDisplayUrl(submission.url))
       onUpdatePageState(browserTab.id, { loading: true, loadError: null })
       // Why: loadURL rejects on any failed navigation; did-fail-load owns error reporting.
-      void webview.loadURL(nextUrl).catch(() => {})
+      void webview.loadURL(submission.url).catch(() => {})
     },
     [browserTab.id, onUpdatePageState]
   )
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col bg-background">
-      <div className="relative z-10 flex items-center gap-2 border-b border-border/70 bg-background/95 px-3 py-1.5">
-        <Button
-          size="icon"
-          variant="ghost"
-          disabled={!browserTab.canGoBack}
-          aria-label={translate('browser.clientHosted.back', 'Back')}
-          onClick={() => webviewRef.current?.goBack()}
-        >
-          <ArrowLeft className="size-4" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          disabled={!browserTab.canGoForward}
-          aria-label={translate('browser.clientHosted.forward', 'Forward')}
-          onClick={() => webviewRef.current?.goForward()}
-        >
-          <ArrowRight className="size-4" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={translate('browser.clientHosted.reload', 'Reload')}
-          onClick={() => webviewRef.current?.reload()}
-        >
-          {browserTab.loading ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <RefreshCw className="size-4" />
-          )}
-        </Button>
-        <BrowserAddressBar
-          value={addressBarValue}
-          onChange={setAddressBarValue}
-          onSubmit={() => navigateToUrl(addressBarValue)}
-          onNavigate={navigateToUrl}
-          inputRef={addressBarInputRef}
-        />
-      </div>
+      <BrowserNavigationControlRow
+        controls={{
+          canGoBack: browserTab.canGoBack,
+          canGoForward: browserTab.canGoForward,
+          loading: browserTab.loading,
+          goBack: () => webviewRef.current?.goBack(),
+          goForward: () => webviewRef.current?.goForward(),
+          reload: () => webviewRef.current?.reload(),
+          navigate: navigateToUrl
+        }}
+        addressBarValue={addressBarValue}
+        onAddressBarChange={setAddressBarValue}
+        onSubmitAddressBar={() => navigateToUrl(addressBarValue)}
+        addressBarInputRef={addressBarInputRef}
+      />
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden bg-background">
         {!attachmentError && browserTab.loadError ? (
           <BrowserLoadFailureOverlay
@@ -289,10 +242,6 @@ export function ClientHostedBrowserPagePane({
       </div>
     </div>
   )
-}
-
-function toDisplayUrl(url: string): string {
-  return url === ORCA_BROWSER_BLANK_URL ? 'about:blank' : redactKagiSessionToken(url)
 }
 
 function readClientPageMetadata(

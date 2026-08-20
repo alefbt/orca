@@ -34,9 +34,6 @@
       "failed": "The browser page stopped unexpectedly. Retry to restore it."
     },
     "clientHosted": {
-      "back": "Back",
-      "forward": "Forward",
-      "reload": "Reload",
       "preparationFailed": "Couldn't start the remote browser on this desktop. Check the paired connection and try again.",
       "unavailableTitle": "Client-hosted browser unavailable",
       "unavailableDescription": "This page is attached to a different desktop or is no longer available.",
@@ -47,6 +44,11 @@
         "failed": "Couldn't finish the download."
       },
       "popupBlocked": "Popup blocked: {{origin}}"
+    },
+    "navigation": {
+      "back": "Back",
+      "forward": "Forward",
+      "reload": "Reload"
     },
     "reopenOnServer": {
       "action": "Reopen on server",
