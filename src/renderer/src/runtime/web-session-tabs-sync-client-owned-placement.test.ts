@@ -8,6 +8,10 @@ import {
   recordWebSessionBrowserPlacement,
   resetWebSessionBrowserPlacementsForTests
 } from './web-session-browser-placement'
+import {
+  recordWebSessionTerminalPlacement,
+  resetWebSessionTerminalPlacementsForTests
+} from './web-session-terminal-placement'
 import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
 import {
   ENV,
@@ -173,6 +177,7 @@ describe('client-owned tab placement for paired worktrees', () => {
   beforeEach(() => {
     resetWebSessionTabsSyncTestState()
     resetWebSessionBrowserPlacementsForTests()
+    resetWebSessionTerminalPlacementsForTests()
   })
 
   // RED: buildMirroredHostGroups prepends client-placed tabs ahead of the mapped host order.
@@ -452,5 +457,56 @@ describe('client-owned tab placement for paired worktrees', () => {
     const effectiveGroups = patch.groupsByWorktree?.[WT] ?? state.groupsByWorktree[WT]
     expect(effectiveGroups?.map((group) => group.id)).toEqual([HOST_GROUP, PREVIEW_GROUP])
     expect((patch.activeGroupIdByWorktree ?? state.activeGroupIdByWorktree)[WT]).toBe(PREVIEW_GROUP)
+  })
+
+  // The host drops client-minted group ids, so the client's own record must land the terminal.
+  it('places a terminal created for a client pane in that pane via its placement record', () => {
+    recordWebSessionTerminalPlacement({
+      environmentId: ENV,
+      worktreeId: WT,
+      hostTabId: 'host-tab-2',
+      groupId: PREVIEW_GROUP
+    })
+
+    const patch = applyWebSessionTabsSnapshot(
+      makeState({
+        activeGroupIdByWorktree: { [WT]: PREVIEW_GROUP },
+        groupsByWorktree: {
+          [WT]: [
+            { id: HOST_GROUP, worktreeId: WT, activeTabId: T1, tabOrder: [T1] },
+            { id: PREVIEW_GROUP, worktreeId: WT, activeTabId: null, tabOrder: [] }
+          ]
+        },
+        layoutByWorktree: { [WT]: SPLIT_LAYOUT },
+        unifiedTabsByWorktree: { [WT]: [terminalUnifiedTab(T1, HOST_GROUP, 0)] }
+      }),
+      makeSnapshot(
+        [
+          terminalSurface('host-tab-1', LEAF_ID, 'terminal-1'),
+          terminalSurface('host-tab-2', SECOND_LEAF_ID, 'terminal-2', true)
+        ],
+        {
+          activeGroupId: HOST_GROUP,
+          activeTabId: `host-tab-2::${SECOND_LEAF_ID}`,
+          activeTabType: 'terminal',
+          tabGroups: [
+            {
+              id: HOST_GROUP,
+              activeTabId: 'host-tab-2',
+              tabOrder: ['host-tab-1', 'host-tab-2'],
+              recentTabIds: []
+            }
+          ]
+        }
+      ),
+      ENV,
+      NOW
+    ) as Partial<WebSessionTabsSyncState>
+
+    expect(groupById(patch, PREVIEW_GROUP)?.tabOrder).toEqual([T2])
+    expect(groupById(patch, HOST_GROUP)?.tabOrder).toEqual([T1])
+    expect(patch.unifiedTabsByWorktree?.[WT]?.find((tab) => tab.id === T2)?.groupId).toBe(
+      PREVIEW_GROUP
+    )
   })
 })

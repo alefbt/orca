@@ -28,6 +28,11 @@ import type {
 } from '../../../shared/browser-workspace-types'
 import type { Tab, TabGroup, TabGroupLayoutNode } from '../../../shared/tab-types'
 import { reconcileClientOwnedTabPlacement } from './web-session-client-owned-tab-placement'
+import {
+  clearWebSessionTerminalPlacementsForEnvironment,
+  clearWebSessionTerminalPlacementsForWorktree,
+  peekWebSessionTerminalPlacementGroup
+} from './web-session-terminal-placement'
 import type { TerminalLayoutSnapshot, TerminalTab } from '../../../shared/terminal-tab-types'
 import type { OpenFile } from '../store/slices/editor'
 import { isTerminalLeafId, makePaneKey, parsePaneKey } from '../../../shared/stable-pane-id'
@@ -738,6 +743,7 @@ function clearWebSessionTabsTrackingForWorktree(environmentId: string, worktreeI
   clearWebAgentSessionHandoffsForWorktree(environmentId, worktreeId)
   clearHostSessionTabIdMappings(environmentId, worktreeId)
   clearWebSessionBrowserPlacementsForWorktree(environmentId, worktreeId)
+  clearWebSessionTerminalPlacementsForWorktree(environmentId, worktreeId)
 }
 
 export function clearWebSessionTabsTrackingForEnvironment(environmentId: string): void {
@@ -792,6 +798,7 @@ export function clearWebSessionTabsTrackingForEnvironment(environmentId: string)
   }
   clearWebAgentSessionHandoffsForEnvironment(trimmedEnvironmentId)
   clearWebSessionBrowserPlacementsForEnvironment(trimmedEnvironmentId)
+  clearWebSessionTerminalPlacementsForEnvironment(trimmedEnvironmentId)
   clearAllWebRuntimeWakeTerminalRespawn()
 }
 
@@ -2916,6 +2923,19 @@ function applyWebSessionTabsSnapshotWithContext(
       })
       return recordedGroupId ? [{ tabId: entry.unifiedTab.id, groupId: recordedGroupId }] : []
     })
+    for (const parentTabId of new Set(terminalSurfaceTabs.map((tab) => tab.parentTabId))) {
+      const recordedGroupId = peekWebSessionTerminalPlacementGroup({
+        environmentId,
+        worktreeId,
+        hostTabId: parentTabId
+      })
+      if (recordedGroupId) {
+        placementMoves.push({
+          tabId: toWebTerminalSurfaceTabId(parentTabId),
+          groupId: recordedGroupId
+        })
+      }
+    }
     const adoptedTabs = mirroredUnifiedTabs
       .filter((tab) => !knownGroupTabIds.has(tab.id))
       .map((tab) => ({

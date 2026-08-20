@@ -81,6 +81,10 @@ import { getRuntimeEnvironmentRevision } from './runtime-environment-revision'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import { toRuntimeExecutionHostId } from '../../../shared/execution-host'
 import {
+  forgetWebSessionTerminalPlacement,
+  recordWebSessionTerminalPlacement
+} from './web-session-terminal-placement'
+import {
   claimWebSessionBrowserPlacementGroupCleanup,
   forgetWebSessionBrowserPlacement,
   markWebSessionBrowserPlacementGroupMaterialized,
@@ -437,6 +441,16 @@ async function createWebRuntimeSessionTerminalResult(
       createdTabId = created.tab.id
       createdLeafId = created.tab.leafId
     }
+    if (args.targetGroupId && createdTabId) {
+      // Why: the host drops client-minted group ids, so this client's own record is what
+      // lands the mirrored tab in the requested pane under client-owned placement.
+      recordWebSessionTerminalPlacement({
+        environmentId,
+        worktreeId: args.worktreeId,
+        hostTabId: createdTabId,
+        groupId: args.targetGroupId
+      })
+    }
     if (args.activate !== false && createdTabId && matchesWebSessionIntentOwner(intentOwner)) {
       // Why: record focus intent so the reconcile follows the snapshot's active
       // tab to THIS new terminal, instead of sticky-keeping the prior tab.
@@ -444,9 +458,13 @@ async function createWebRuntimeSessionTerminalResult(
     }
     await refreshWebRuntimeSessionTabsSnapshot(environmentId, args.worktreeId, {
       expectedEnvironmentPairingRevision: intentOwner.pairingRevision,
-      // Why: the publication can beat the RPC response; replay it once after caller focus intent exists.
-      acceptCurrentSnapshot: args.activate !== false && Boolean(createdTabId)
+      // Why: the publication can beat the RPC response; replay it once after caller intent exists.
+      acceptCurrentSnapshot:
+        Boolean(createdTabId) && (args.activate !== false || Boolean(args.targetGroupId))
     })
+    if (args.targetGroupId && createdTabId) {
+      await settleWebRuntimeTerminalPlacement(environmentId, args.worktreeId, createdTabId)
+    }
     return {
       outcome: { status: 'created' },
       ...(createdTabId ? { hostTabId: createdTabId } : {})
@@ -459,12 +477,41 @@ async function createWebRuntimeSessionTerminalResult(
         : '[web-runtime-session] failed to create terminal:',
       message
     )
+    if (createdTabId) {
+      // Why: a record that outlives the create flow could yank a user-dragged tab back later.
+      forgetWebSessionTerminalPlacement({
+        environmentId,
+        worktreeId: args.worktreeId,
+        hostTabId: createdTabId
+      })
+    }
     // Why: once the host accepted creation, reporting failure invites the user
     // to retry with a new operation ID and can duplicate a fresh agent.
     return {
       outcome: hostCreated ? { status: 'created' } : { status: 'failed', message },
       ...(createdTabId ? { hostTabId: createdTabId } : {})
     }
+  }
+}
+
+/** Consume the placement record once the mirrored tab exists (bounded poll, then forget). */
+async function settleWebRuntimeTerminalPlacement(
+  environmentId: string,
+  worktreeId: string,
+  hostTabId: string
+): Promise<void> {
+  const unifiedTabId = toWebTerminalSurfaceTabId(hostTabId)
+  const materialized = (): boolean =>
+    (useAppStore.getState().unifiedTabsByWorktree[worktreeId] ?? []).some(
+      (tab) => tab.id === unifiedTabId
+    )
+  try {
+    const deadline = Date.now() + 10_000
+    while (!materialized() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+  } finally {
+    forgetWebSessionTerminalPlacement({ environmentId, worktreeId, hostTabId })
   }
 }
 
