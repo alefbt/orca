@@ -77,6 +77,10 @@ import {
   waitForWorktreeTabRegistration
 } from '../ipc/browser-tab-registration-wait'
 import { sendRemoteBrowserScreencastFrame } from './remote-browser-screencast-frame-admission'
+import {
+  browserTabCreateClientPageStartsActive,
+  publishCreatedBrowserSessionTab
+} from './browser-tab-create-publication'
 import type { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
 import {
   closeRuntimeBrowserClientPage,
@@ -1480,18 +1484,15 @@ export class RuntimeBrowserCommands {
         placement: created.placement,
         url: 'about:blank',
         loading: url !== 'about:blank',
-        active: params.activate !== false
+        active: browserTabCreateClientPageStartsActive(params.activate)
       })
-      this.host.notifyHeadlessBrowserSessionTabsChanged?.(worktree.id)
-      // Why: like the offscreen path, only user-initiated creates mark active — and the
-      // marker is what moves the tab into the clicked split group instead of the leftmost.
-      if (params.activate === true) {
-        this.host.markHeadlessBrowserSessionTabActive?.(
-          worktree.id,
-          browserPageId,
-          params.targetGroupId
-        )
-      }
+      publishCreatedBrowserSessionTab(this.host, {
+        placementKind: 'client',
+        browserPageId,
+        worktreeId: worktree.id,
+        activate: params.activate,
+        targetGroupId: params.targetGroupId
+      })
       if (url !== 'about:blank') {
         try {
           await navigateRuntimeBrowserClientPage(authority, {
@@ -1513,15 +1514,21 @@ export class RuntimeBrowserCommands {
       if (!offscreen) {
         throw new BrowserError('browser_error', 'This host does not support browser panes.')
       }
-      return this.createBrowserTabOffscreen(
-        offscreen,
+      // Why: the offscreen backend registers synchronously, so there is no webview-mount wait.
+      const created = await offscreen.createTab({
         url,
         worktreeId,
-        params.profileId,
-        params.activate,
-        params.targetGroupId,
-        params.page
-      )
+        profileId: params.profileId,
+        ...(params.page ? { browserPageId: params.page } : {})
+      })
+      publishCreatedBrowserSessionTab(this.host, {
+        placementKind: 'offscreen',
+        browserPageId: created.browserPageId,
+        worktreeId,
+        activate: params.activate,
+        targetGroupId: params.targetGroupId
+      })
+      return { browserPageId: created.browserPageId }
     }
     const { browserPageId } = await this.createBrowserTabInRenderer(
       url,
@@ -1541,12 +1548,14 @@ export class RuntimeBrowserCommands {
       }
     }
 
-    // Why: auto-activate the new tab so subsequent commands target it without an explicit switch.
     const bridge = this.requireAgentBrowserBridge()
-    const wcId = bridge.getRegisteredTabs(worktreeId).get(browserPageId)
-    if (wcId != null) {
-      bridge.setActiveTab(wcId, worktreeId)
-    }
+    publishCreatedBrowserSessionTab(this.host, {
+      placementKind: 'renderer',
+      browserPageId,
+      worktreeId,
+      activate: params.activate,
+      targetGroupId: params.targetGroupId
+    })
 
     // Why: the webview loads about:blank first; route navigation through the bridge so its registered owner remains authoritative.
     if (url && url !== 'about:blank') {
@@ -2022,34 +2031,6 @@ export class RuntimeBrowserCommands {
       )
     }
     return this.enrichBrowserTabInfo(tab)
-  }
-
-  // Why: headless serve path — the offscreen backend registers synchronously, so there is no webview-mount wait.
-  private async createBrowserTabOffscreen(
-    offscreen: BrowserBackend,
-    url: string,
-    worktreeId?: string,
-    profileId?: string,
-    activate?: boolean,
-    targetGroupId?: string,
-    requestedPageId?: string
-  ): Promise<{ browserPageId: string }> {
-    const { browserPageId } = await offscreen.createTab({
-      url,
-      worktreeId,
-      profileId,
-      ...(requestedPageId ? { browserPageId: requestedPageId } : {})
-    })
-    const bridge = this.host.getAgentBrowserBridge()
-    const wcId = bridge?.getRegisteredTabs(worktreeId).get(browserPageId)
-    if (bridge && wcId != null) {
-      bridge.setActiveTab(wcId, worktreeId)
-    }
-    // Why: only user-initiated creates (activate:true) mark the tab active; agent/background creates must not yank a connected client to it.
-    if (activate === true) {
-      this.host.markHeadlessBrowserSessionTabActive?.(worktreeId, browserPageId, targetGroupId)
-    }
-    return { browserPageId }
   }
 
   private async createBrowserTabInRenderer(
