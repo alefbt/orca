@@ -148,6 +148,10 @@ function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserSc
   }
 }
 
+function hasScreencastViewportSize(viewport: BrowserScreencastViewport): boolean {
+  return viewport.viewportWidth !== undefined && viewport.viewportHeight !== undefined
+}
+
 function clampInteger(
   value: number | undefined,
   min: number,
@@ -598,7 +602,11 @@ export class RuntimeBrowserCommands {
       resolveDone: resolveSubscriberDone,
       viewport
     })
-    active.viewportOwnerSubscriptionId = subscriptionId
+    // Why: normalizeScreencastViewport keeps undefined dimensions, so a sizeless
+    // subscriber taking ownership would clear the emulation for every viewer.
+    if (hasScreencastViewportSize(viewport)) {
+      active.viewportOwnerSubscriptionId = subscriptionId
+    }
     let session: BrowserScreencastSession
     try {
       session = await active.started
@@ -622,7 +630,9 @@ export class RuntimeBrowserCommands {
           active.subscribers.delete(subscriptionId)
           subscriber.resolveDone()
           if (active.viewportOwnerSubscriptionId === subscriptionId) {
-            const fallback = Array.from(active.subscribers.entries()).at(-1)
+            const fallback = Array.from(active.subscribers.entries()).findLast(([, candidate]) =>
+              hasScreencastViewportSize(candidate.viewport)
+            )
             active.viewportOwnerSubscriptionId = fallback?.[0] ?? null
             if (fallback) {
               void session.updateViewport(fallback[1].viewport).catch(() => {})

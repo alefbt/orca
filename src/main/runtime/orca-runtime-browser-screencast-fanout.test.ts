@@ -105,6 +105,41 @@ describe('RuntimeBrowserCommands screencast fanout', () => {
     expect(stop).toHaveBeenCalledOnce()
   })
 
+  it('keeps viewport authority with sized subscribers when a sizeless viewer joins', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const stop = vi.fn(() => done.resolve())
+    const updateViewport = vi.fn(async () => {})
+    startBrowserScreencast.mockResolvedValue({ stop, done: done.promise, updateViewport })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const sized = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        viewportWidth: 1200,
+        viewportHeight: 800
+      },
+      { sendBinary: vi.fn(() => true) }
+    )
+    const sizeless = await commands.browserScreencast(
+      { worktree: 'id:wt-1', page: 'page-1', format: 'jpeg' },
+      { sendBinary: vi.fn(() => true) }
+    )
+
+    // Why: a sizeless owner would push undefined dimensions into the shared
+    // stream and clear the device-metrics override for every viewer.
+    expect(updateViewport).not.toHaveBeenCalled()
+
+    sized.session.stop()
+    await sized.session.done
+    expect(updateViewport).not.toHaveBeenCalled()
+    expect(stop).not.toHaveBeenCalled()
+    sizeless.session.stop()
+    await sizeless.session.done
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
   it('admits shared frames through the paired-runtime size guard', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     const done = deferred()

@@ -121,7 +121,9 @@ export async function startBrowserScreencast(
           snapshotCapture.bumpGeneration()
           snapshotCapture.clearNavigationCaptureTimer()
           framePacer.clearPending(true)
-          await snapshotCapture.emitSnapshotFrame(true)
+          // Why: initialOnly skips every stream that ever emitted a frame, which would
+          // leave the old device metrics applied and the new subscriber frameless.
+          await snapshotCapture.emitSnapshotFrame(false)
         })
       return viewportUpdate
     },

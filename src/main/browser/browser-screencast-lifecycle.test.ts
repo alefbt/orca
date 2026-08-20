@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -26,6 +27,7 @@ function createWebContents() {
 describe('browser screencast lifecycle', () => {
   it('updates a live shared stream viewport and clears an obsolete override', async () => {
     const webContents = createWebContents()
+    const onFrame = vi.fn()
     const session = await startBrowserScreencast(webContents as never, {
       format: 'jpeg',
       quality: 70,
@@ -35,8 +37,17 @@ describe('browser screencast lifecycle', () => {
       viewportHeight: 800,
       everyNthFrame: 2,
       minFrameIntervalMs: 0,
-      onFrame: vi.fn()
+      onFrame
     })
+
+    // Why: a joining subscriber always updates a stream that has already emitted
+    // frames; without one this test cannot distinguish the initial-snapshot path.
+    webContents.debugger.emit('message', {}, 'Page.screencastFrame', {
+      sessionId: 7,
+      data: Buffer.from('live-frame').toString('base64'),
+      metadata: {}
+    })
+    expect(onFrame).toHaveBeenCalledOnce()
 
     await session.updateViewport({
       viewportWidth: 800,
