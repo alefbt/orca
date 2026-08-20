@@ -53,7 +53,7 @@ const LOCALIZED_STEP_COPY: Record<string, { title: () => string; body: () => str
     body: () =>
       translate(
         'auto.components.contextual.tours.contextual.tour.overlay.measurement.client.hosted.browser.intro.body',
-        'Remote browser tabs now open right here for a native feel; traffic still goes through the remote host.'
+        'Remote browser tabs now render on this device. Network traffic still goes through the remote host.'
       )
   },
   'automations-results': {

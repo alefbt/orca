@@ -130,7 +130,7 @@ export const CONTEXTUAL_TOURS = [
       {
         id: 'client-hosted-browser-intro',
         title: 'This page renders on your desktop',
-        body: 'Remote browser tabs now open right here for a native feel; traffic still goes through the remote host.',
+        body: 'Remote browser tabs now render on this device. Network traffic still goes through the remote host.',
         targetSelector: '[data-contextual-tour-target="client-hosted-browser-controls"]',
         requiredForStart: true,
         preferredPlacement: 'bottom',
