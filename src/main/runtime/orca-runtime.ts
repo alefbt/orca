@@ -9503,7 +9503,14 @@ export class OrcaRuntimeService {
     browserPageId: string,
     targetGroupId?: string
   ): void {
-    if (!this.offscreenBrowserBackend || !worktreeId) {
+    if (!worktreeId) {
+      return
+    }
+    // Why: client-placed pages publish through the page registry and need no offscreen backing.
+    if (
+      !this.offscreenBrowserBackend &&
+      !getRuntimeBrowserPageRegistry(this).getPage(browserPageId)
+    ) {
       return
     }
     // Hydrate first so the freshly created browser tab is present in the snapshot.

@@ -689,6 +689,22 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         ...(expectedGroupId ? { expectedGroupId } : {})
       })
     }
+    if (!materialized && expectedGroupId) {
+      // Why: an older runtime can honor creation but not group targeting; a live tab in
+      // the wrong split beats destroying what the user just made.
+      materialized = hasMaterializedWebRuntimeBrowserPage(
+        useAppStore.getState(),
+        environmentId,
+        args.worktreeId,
+        created.browserPageId
+      )
+      if (materialized) {
+        console.warn(
+          '[web-runtime-session] created browser tab landed outside the requested group:',
+          expectedGroupId
+        )
+      }
+    }
     if (!materialized) {
       throw new Error('The created browser tab did not materialize in the client.')
     }

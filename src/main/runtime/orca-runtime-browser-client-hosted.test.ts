@@ -194,6 +194,63 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
+  it('moves a user-created client page into the clicked split group', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const markHeadlessBrowserSessionTabActive = vi.fn()
+    const host = createHost({
+      resolveBrowserNetworkExecutionHost: vi.fn(async () => ({
+        kind: 'native' as const,
+        runtimeId: 'runtime-a',
+        revision: 7
+      })),
+      markHeadlessBrowserSessionTabActive,
+      getBrowserHostLeaseRegistry: () =>
+        ({
+          authorityRuntimeId: 'runtime-a',
+          authorityEpoch: 'epoch-a',
+          createClientPage: vi.fn(async () => ({
+            kind: 'client' as const,
+            browserHostClientId: 'host-a',
+            browserHostGeneration: 3,
+            pageHostGeneration: 9
+          })),
+          issueClientPageCommand: vi.fn(() => ({
+            event: {} as never,
+            result: Promise.resolve({ status: 'completed' as const })
+          }))
+        }) as never
+    })
+    const commands = new RuntimeBrowserCommands(host)
+
+    await commands.browserTabCreate(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-grouped',
+        activate: true,
+        targetGroupId: 'group-right',
+        placement: { kind: 'client', browserHostClientId: 'host-a' }
+      },
+      { pairedDeviceId: 'device-a' }
+    )
+    expect(markHeadlessBrowserSessionTabActive).toHaveBeenCalledWith(
+      'wt-1',
+      'page-grouped',
+      'group-right'
+    )
+
+    markHeadlessBrowserSessionTabActive.mockClear()
+    await commands.browserTabCreate(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-background',
+        placement: { kind: 'client', browserHostClientId: 'host-a' }
+      },
+      { pairedDeviceId: 'device-a' }
+    )
+    // Why: agent/background creates must not yank a connected client to the new tab.
+    expect(markHeadlessBrowserSessionTabActive).not.toHaveBeenCalled()
+  })
+
   it('publishes the proven client page before navigation and scopes it to the worktree', async () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     const createProof = deferred<{

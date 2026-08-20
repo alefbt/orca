@@ -1483,6 +1483,15 @@ export class RuntimeBrowserCommands {
         active: params.activate !== false
       })
       this.host.notifyHeadlessBrowserSessionTabsChanged?.(worktree.id)
+      // Why: like the offscreen path, only user-initiated creates mark active — and the
+      // marker is what moves the tab into the clicked split group instead of the leftmost.
+      if (params.activate === true) {
+        this.host.markHeadlessBrowserSessionTabActive?.(
+          worktree.id,
+          browserPageId,
+          params.targetGroupId
+        )
+      }
       if (url !== 'about:blank') {
         try {
           await navigateRuntimeBrowserClientPage(authority, {
