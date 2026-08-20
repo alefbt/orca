@@ -1,4 +1,5 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
+import { BROWSER_CLIENT_HOSTED_REMOTE_SETTINGS_TARGET_ID } from '@/lib/settings-navigation-types'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSwitchRow } from './SettingsFormControls'
 import {
@@ -20,6 +21,7 @@ export function BrowserClientHostedRemoteSetting({
 
   return (
     <SearchableSetting
+      id={BROWSER_CLIENT_HOSTED_REMOTE_SETTINGS_TARGET_ID}
       title={title}
       description={description}
       keywords={[

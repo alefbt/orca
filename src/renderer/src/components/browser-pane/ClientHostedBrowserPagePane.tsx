@@ -14,6 +14,7 @@ import {
 import { attachBrowserClientPageToViewport } from './browser-client-page-renderer-installation'
 import { useBrowserClientHostedDownloadNotices } from './browser-client-hosted-download-notices'
 import { useBrowserClientHostedPopupNotices } from './browser-client-hosted-popup-notices'
+import { useClientHostedBrowserIntroTour } from './use-client-hosted-browser-intro-tour'
 import {
   ReopenBrowserPageOnServerButton,
   reopenOnServerCaveat
@@ -58,6 +59,7 @@ export function ClientHostedBrowserPagePane({
 
   useBrowserClientHostedDownloadNotices(browserTab.id)
   useBrowserClientHostedPopupNotices(browserTab.id)
+  useClientHostedBrowserIntroTour(isActive && !attachmentError)
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -186,21 +188,23 @@ export function ClientHostedBrowserPagePane({
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col bg-background">
-      <BrowserNavigationControlRow
-        controls={{
-          canGoBack: browserTab.canGoBack,
-          canGoForward: browserTab.canGoForward,
-          loading: browserTab.loading,
-          goBack: () => webviewRef.current?.goBack(),
-          goForward: () => webviewRef.current?.goForward(),
-          reload: () => webviewRef.current?.reload(),
-          navigate: navigateToUrl
-        }}
-        addressBarValue={addressBarValue}
-        onAddressBarChange={setAddressBarValue}
-        onSubmitAddressBar={() => navigateToUrl(addressBarValue)}
-        addressBarInputRef={addressBarInputRef}
-      />
+      <div data-contextual-tour-target="client-hosted-browser-controls">
+        <BrowserNavigationControlRow
+          controls={{
+            canGoBack: browserTab.canGoBack,
+            canGoForward: browserTab.canGoForward,
+            loading: browserTab.loading,
+            goBack: () => webviewRef.current?.goBack(),
+            goForward: () => webviewRef.current?.goForward(),
+            reload: () => webviewRef.current?.reload(),
+            navigate: navigateToUrl
+          }}
+          addressBarValue={addressBarValue}
+          onAddressBarChange={setAddressBarValue}
+          onSubmitAddressBar={() => navigateToUrl(addressBarValue)}
+          addressBarInputRef={addressBarInputRef}
+        />
+      </div>
       <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-hidden bg-background">
         {!attachmentError && browserTab.loadError ? (
           <BrowserLoadFailureOverlay
