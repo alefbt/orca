@@ -78,6 +78,51 @@ describe('browser screencast lifecycle', () => {
     await session.done
   })
 
+  it('restarts the screencast and retimes the pacer when the shared frame budget changes', async () => {
+    const webContents = createWebContents()
+    const onFrame = vi.fn()
+    const session = await startBrowserScreencast(webContents as never, {
+      format: 'jpeg',
+      quality: 70,
+      maxWidth: 3840,
+      maxHeight: 2160,
+      everyNthFrame: 2,
+      minFrameIntervalMs: 0,
+      onFrame
+    })
+
+    await session.updateFrameBudget({
+      quality: 60,
+      maxWidth: 975,
+      maxHeight: 844,
+      everyNthFrame: 1,
+      minFrameIntervalMs: 100
+    })
+    expect(webContents.debugger.sendCommand).toHaveBeenLastCalledWith('Page.startScreencast', {
+      format: 'jpeg',
+      quality: 60,
+      maxWidth: 975,
+      maxHeight: 844,
+      everyNthFrame: 1
+    })
+
+    const emitFrame = (sessionId: number): void => {
+      webContents.debugger.emit('message', {}, 'Page.screencastFrame', {
+        sessionId,
+        data: Buffer.from(`frame-${sessionId}`).toString('base64'),
+        metadata: {}
+      })
+    }
+    emitFrame(1)
+    emitFrame(2)
+    // Why: the new interval only takes effect if the pacer reads it live off the shared
+    // options; a pinned creator interval would let both frames straight through.
+    expect(onFrame).toHaveBeenCalledOnce()
+
+    session.stop()
+    await session.done
+  })
+
   it('acks malformed frames when Chromium supplied a valid session id', () => {
     const webContents = createWebContents()
     const ackScreencastFrame = vi.fn()

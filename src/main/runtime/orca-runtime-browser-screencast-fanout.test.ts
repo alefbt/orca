@@ -152,7 +152,12 @@ describe('RuntimeBrowserCommands screencast fanout', () => {
     })
     startBrowserScreencast.mockImplementation(async (_guest: unknown, options: never) => {
       onFrame = (options as { onFrame: typeof onFrame }).onFrame
-      return { stop: vi.fn(() => done.resolve()), done: done.promise, updateViewport }
+      return {
+        stop: vi.fn(() => done.resolve()),
+        done: done.promise,
+        updateViewport,
+        updateFrameBudget: vi.fn(async () => {})
+      }
     })
     const commands = new RuntimeBrowserCommands(createCommandsHost())
     const creatorSend = vi.fn(() => true)
@@ -192,6 +197,68 @@ describe('RuntimeBrowserCommands screencast fanout', () => {
     expect(joinerSend).not.toHaveBeenCalled()
     joiner.session.stop()
     await joiner.session.done
+  })
+
+  it('drives the shared stream at the most constrained subscriber and releases it on leave', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const done = deferred()
+    const updateFrameBudget = vi.fn(async () => {})
+    startBrowserScreencast.mockResolvedValue({
+      stop: vi.fn(() => done.resolve()),
+      done: done.promise,
+      updateViewport: vi.fn(async () => {}),
+      updateFrameBudget
+    })
+    const commands = new RuntimeBrowserCommands(createCommandsHost())
+    const desktop = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        quality: 70,
+        maxWidth: 3840,
+        maxHeight: 2160,
+        everyNthFrame: 2
+      },
+      { sendBinary: vi.fn(() => true) }
+    )
+    expect(startBrowserScreencast).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ maxWidth: 3840, everyNthFrame: 2, minFrameIntervalMs: 0 })
+    )
+
+    const phone = await commands.browserScreencast(
+      {
+        worktree: 'id:wt-1',
+        page: 'page-1',
+        format: 'jpeg',
+        quality: 72,
+        maxWidth: 975,
+        maxHeight: 844,
+        everyNthFrame: 1,
+        minFrameIntervalMs: 100
+      },
+      { sendBinary: vi.fn(() => true) }
+    )
+    expect(updateFrameBudget).toHaveBeenLastCalledWith({
+      quality: 70,
+      maxWidth: 975,
+      maxHeight: 844,
+      everyNthFrame: 1,
+      minFrameIntervalMs: 100
+    })
+
+    phone.session.stop()
+    await phone.session.done
+    expect(updateFrameBudget).toHaveBeenLastCalledWith({
+      quality: 70,
+      maxWidth: 3840,
+      maxHeight: 2160,
+      everyNthFrame: 2,
+      minFrameIntervalMs: 0
+    })
+    desktop.session.stop()
+    await desktop.session.done
   })
 
   it('admits shared frames through the paired-runtime size guard', async () => {

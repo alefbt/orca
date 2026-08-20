@@ -62,7 +62,12 @@ import type { BrowserBackend } from '../browser/browser-backend'
 import { browserCertificateTrustController, browserManager } from '../browser/browser-manager'
 import { BrowserError } from '../browser/cdp-bridge'
 import { startBrowserScreencast } from '../browser/browser-screencast-stream'
+import {
+  browserScreencastFrameBudgetsEqual,
+  mergeBrowserScreencastFrameBudgets
+} from '../browser/browser-screencast-frame-budget'
 import type {
+  BrowserScreencastFrameBudget,
   BrowserScreencastSession,
   BrowserScreencastViewport
 } from '../browser/browser-screencast-stream-types'
@@ -123,7 +128,8 @@ type BrowserScreencastParams = {
 type BrowserScreencastStartResult = {
   subscriptionId: string
   ready: Extract<BrowserScreencastResult, { type: 'ready' }>
-  session: BrowserScreencastSession
+  // The frame budget belongs to the shared page, not to one subscriber's handle.
+  session: Omit<BrowserScreencastSession, 'updateFrameBudget'>
   // Why: callers gate frames until they have emitted `ready`, and the snapshot captured
   // for a joining subscriber lands inside that window. This replays it once the gate opens.
   flushPendingFrame: () => void
@@ -135,6 +141,7 @@ type ActiveBrowserScreencastSubscriber = {
   done: Promise<void>
   resolveDone: () => void
   viewport: BrowserScreencastViewport
+  budget: BrowserScreencastFrameBudget
   pendingFrame: Uint8Array<ArrayBufferLike> | null
 }
 
@@ -145,6 +152,21 @@ type ActiveBrowserScreencastPage = {
   stopping: boolean
   subscribers: Map<string, ActiveBrowserScreencastSubscriber>
   viewportOwnerSubscriptionId: string | null
+  appliedBudget: BrowserScreencastFrameBudget
+}
+
+async function applySharedScreencastFrameBudget(
+  active: ActiveBrowserScreencastPage,
+  session: BrowserScreencastSession
+): Promise<void> {
+  const merged = mergeBrowserScreencastFrameBudgets(
+    Array.from(active.subscribers.values(), (subscriber) => subscriber.budget)
+  )
+  if (!merged || browserScreencastFrameBudgetsEqual(merged, active.appliedBudget)) {
+    return
+  }
+  active.appliedBudget = merged
+  await session.updateFrameBudget(merged)
 }
 
 function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserScreencastViewport {
@@ -153,6 +175,18 @@ function normalizeScreencastViewport(params: BrowserScreencastParams): BrowserSc
     viewportHeight: clampOptionalInteger(params.viewportHeight, 240, 2160),
     deviceScaleFactor: clampOptionalNumber(params.deviceScaleFactor, 1, 4),
     mobile: params.mobile === true
+  }
+}
+
+function normalizeScreencastFrameBudget(
+  params: BrowserScreencastParams
+): BrowserScreencastFrameBudget {
+  return {
+    quality: clampInteger(params.quality, 10, 100, 70),
+    maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
+    maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
+    everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
+    minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0)
   }
 }
 
@@ -539,6 +573,7 @@ export class RuntimeBrowserCommands {
     )
     const subscriptionId = `browser-screencast:${browserPageId}:${randomUUID()}`
     const viewport = normalizeScreencastViewport(params)
+    const budget = normalizeScreencastFrameBudget(params)
     let resolveSubscriberDone!: () => void
     const subscriberDone = new Promise<void>((resolve) => {
       resolveSubscriberDone = resolve
@@ -557,16 +592,13 @@ export class RuntimeBrowserCommands {
         session: null,
         stopping: false,
         subscribers,
-        viewportOwnerSubscriptionId: null
+        viewportOwnerSubscriptionId: null,
+        appliedBudget: budget
       } as ActiveBrowserScreencastPage
       record.started = startBrowserScreencast(guest, {
         format: params.format,
-        quality: clampInteger(params.quality, 10, 100, 70),
-        maxWidth: clampInteger(params.maxWidth, 320, 3840, 1440),
-        maxHeight: clampInteger(params.maxHeight, 240, 2160, 1200),
+        ...budget,
         ...viewport,
-        everyNthFrame: clampInteger(params.everyNthFrame, 1, 10, 2),
-        minFrameIntervalMs: clampInteger(params.minFrameIntervalMs, 0, 1000, 0),
         onFrame: (bytes) => {
           for (const subscriber of record.subscribers.values()) {
             // A slow viewer drops this frame without stalling every other viewer, but the
@@ -612,6 +644,7 @@ export class RuntimeBrowserCommands {
       done: subscriberDone,
       resolveDone: resolveSubscriberDone,
       viewport,
+      budget,
       pendingFrame: null
     })
     // Why: normalizeScreencastViewport keeps undefined dimensions, so a sizeless
@@ -627,8 +660,11 @@ export class RuntimeBrowserCommands {
       resolveSubscriberDone()
       throw error
     }
-    if (!createdPageStream && active.viewportOwnerSubscriptionId === subscriptionId) {
-      await session.updateViewport(viewport)
+    if (!createdPageStream) {
+      if (active.viewportOwnerSubscriptionId === subscriptionId) {
+        await session.updateViewport(viewport)
+      }
+      await applySharedScreencastFrameBudget(active, session)
     }
     return {
       subscriptionId,
@@ -663,7 +699,11 @@ export class RuntimeBrowserCommands {
           if (active.subscribers.size === 0) {
             active.stopping = true
             session.stop()
+            return
           }
+          // Why: a departed subscriber's caps would otherwise pin the shared stream for
+          // the rest of its life, long after the client that asked for them is gone.
+          void applySharedScreencastFrameBudget(active, session).catch(() => {})
         },
         updateViewport: session.updateViewport
       },
