@@ -9469,7 +9469,8 @@ export class OrcaRuntimeService {
     )
   }
 
-  private retireRuntimeOwnedBrowserSessionTab(worktreeId: string, browserPageId: string): void {
+  // Public so runtime-side page release (lease fencing) can prune a tab whose page is gone.
+  retireRuntimeOwnedBrowserSessionTab(worktreeId: string, browserPageId: string): void {
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (!snapshot) {
       return

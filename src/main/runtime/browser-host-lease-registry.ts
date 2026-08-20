@@ -15,7 +15,7 @@ import {
   type BrowserTunnelLeaseHandle
 } from './browser-host-lease-records'
 import { BrowserHostGenerationCounter } from './browser-host-generation-counter'
-import { assertBrowserHostPageCommandAdmission } from './browser-host-page-command-admission'
+import { issueBrowserHostClientPageCommand } from './browser-host-client-page-command-issue'
 import {
   BrowserHostPagePlacementRegistry,
   type BrowserClientPageAuthority,
@@ -74,6 +74,11 @@ export class BrowserHostLeaseRegistry {
        * download transfers) is not stranded.
        */
       onClientPageReleased?: (browserPageId: string) => void
+      /**
+       * Called when a lease fence retires a client page. Nothing on the client side will ever
+       * acknowledge that page, so the runtime's own record of it (its tab) has to be dropped here.
+       */
+      onClientPageFenced?: (browserPageId: string, placement: RuntimeBrowserClientPlacement) => void
     }
   ) {
     this.authorityRuntimeId = options.authorityRuntimeId
@@ -246,23 +251,7 @@ export class BrowserHostLeaseRegistry {
     result: Promise<BrowserClientHostCommandResult>
   } {
     this.requireClientPage(authority)
-    const state = this.leasesByClientId.get(authority.browserHostClientId)
-    const ledger = state?.commandLedger
-    if (
-      !state ||
-      state.lease.browserHostGeneration !== authority.browserHostGeneration ||
-      !ledger
-    ) {
-      throw new Error('browser_host_command_protocol_required')
-    }
-    assertBrowserHostPageCommandAdmission(state.lease, command, (executionHostKey) =>
-      state.executionHostGrants.require(executionHostKey)
-    )
-    return ledger.issue({
-      browserPageId: authority.browserPageId,
-      pageHostGeneration: authority.pageHostGeneration,
-      command
-    })
+    return issueBrowserHostClientPageCommand(authority, command, this.leasesByClientId)
   }
 
   settleClientPageCommand(
@@ -322,7 +311,13 @@ export class BrowserHostLeaseRegistry {
       clearReconnect: (fenced) => this.reconnects.clear(fenced),
       fenceReconciliation: (fenced) => this.pageReconciliations.fence(fenced),
       fenceRoute: (route, routeReason) => this.tunnels.fence(route, routeReason),
-      onClientPageReleased: this.options.onClientPageReleased
+      releaseFencedPage: (retirement) => this.releaseFencedClientPage(retirement)
     })
+  }
+
+  private releaseFencedClientPage(retirement: BrowserPageRetirement): void {
+    if (this.completePageRetirement(retirement) && retirement.placement.kind === 'client') {
+      this.options.onClientPageFenced?.(retirement.browserPageId, retirement.placement)
+    }
   }
 }

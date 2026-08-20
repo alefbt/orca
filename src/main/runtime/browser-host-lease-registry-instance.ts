@@ -1,11 +1,15 @@
 import { releaseBrowserClientDownloadTransfersForPage } from './browser-client-download-transfer-store'
 import { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
+import {
+  releaseRuntimeBrowserClientPageRecord,
+  type RuntimeBrowserClientPageReleaseHost
+} from './runtime-browser-client-page-release'
 
 const registries = new WeakMap<object, BrowserHostLeaseRegistry>()
 
-export function getBrowserHostLeaseRegistry(runtime: {
-  getRuntimeId(): string
-}): BrowserHostLeaseRegistry {
+export function getBrowserHostLeaseRegistry(
+  runtime: { getRuntimeId(): string } & RuntimeBrowserClientPageReleaseHost
+): BrowserHostLeaseRegistry {
   let registry = registries.get(runtime)
   if (!registry) {
     registry = new BrowserHostLeaseRegistry({
@@ -14,6 +18,9 @@ export function getBrowserHostLeaseRegistry(runtime: {
         void releaseBrowserClientDownloadTransfersForPage(runtime, browserPageId).catch((error) => {
           console.warn('[browser-host-lease] download transfer cleanup failed:', error)
         })
+      },
+      onClientPageFenced: (browserPageId, placement) => {
+        releaseRuntimeBrowserClientPageRecord(runtime, browserPageId, placement)
       }
     })
     registries.set(runtime, registry)

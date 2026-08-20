@@ -48,7 +48,7 @@ afterEach(() => {
 })
 
 describe('browser host lease placement retirement', () => {
-  it('makes exact client placements terminal before explicit lease release settles', async () => {
+  it('releases exact client placements when an explicit lease release settles', async () => {
     const leases = registry()
     const host = attachHost(leases, 'host-a')
     const placement = leases.placeClientPage('page-a', 'host-a')
@@ -58,15 +58,14 @@ describe('browser host lease placement retirement', () => {
 
     host.release()
 
+    expect(leases.getPlacement('page-a')).toBeUndefined()
     expect(() => leases.requireClientPage(authority('page-a', placement))).toThrow(
-      'browser_page_retirement_pending'
+      'browser_client_page_placement_required'
     )
-    const retirement = leases.beginPageRetirement('page-a', placement)
-    expect(leases.cancelPageRetirement(retirement)).toBe(false)
     await expect(host.whenFenced).resolves.toBe('released')
   })
 
-  it('upgrades an existing retirement to non-cancellable after host loss', () => {
+  it('completes an already-begun retirement after host loss', () => {
     const leases = registry()
     const host = attachHost(leases, 'host-a')
     const placement = leases.placeClientPage('page-a', 'host-a')
@@ -74,9 +73,9 @@ describe('browser host lease placement retirement', () => {
 
     host.release()
 
-    expect(leases.beginPageRetirement('page-a', placement)).toBe(retirement)
+    expect(leases.getPlacement('page-a')).toBeUndefined()
     expect(leases.cancelPageRetirement(retirement)).toBe(false)
-    expect(leases.completePageRetirement(retirement)).toBe(true)
+    expect(leases.completePageRetirement(retirement)).toBe(false)
   })
 
   it('leaves other hosts and server placements live', () => {
@@ -92,8 +91,7 @@ describe('browser host lease placement retirement', () => {
 
     hostA.release()
 
-    const retirementA = leases.beginPageRetirement('page-a', placementA)
-    expect(leases.cancelPageRetirement(retirementA)).toBe(false)
+    expect(leases.getPlacement('page-a')).toBeUndefined()
     expect(leases.requireClientPage(authority('page-b', placementB))).toBe(placementB)
     const retirementB = leases.beginPageRetirement('page-b', placementB)
     expect(leases.cancelPageRetirement(retirementB)).toBe(true)
@@ -118,18 +116,16 @@ describe('browser host lease placement retirement', () => {
     vi.useFakeTimers()
     const leases = registry(1_000)
     const reconnecting = attachHost(leases, 'host-a', { reconnect: true })
-    const reconnectingPlacement = leases.placeClientPage('page-a', 'host-a')
+    leases.placeClientPage('page-a', 'host-a')
     const legacy = attachHost(leases, 'host-b')
-    const legacyPlacement = leases.placeClientPage('page-b', 'host-b')
+    leases.placeClientPage('page-b', 'host-b')
 
     reconnecting.disconnect()
     await vi.advanceTimersByTimeAsync(1_000)
-    const expiredRetirement = leases.beginPageRetirement('page-a', reconnectingPlacement)
-    expect(leases.cancelPageRetirement(expiredRetirement)).toBe(false)
+    expect(leases.getPlacement('page-a')).toBeUndefined()
 
     legacy.disconnect()
-    const legacyRetirement = leases.beginPageRetirement('page-b', legacyPlacement)
-    expect(leases.cancelPageRetirement(legacyRetirement)).toBe(false)
+    expect(leases.getPlacement('page-b')).toBeUndefined()
   })
 
   it('does not let late old-generation cleanup retire a replacement', () => {
@@ -137,33 +133,38 @@ describe('browser host lease placement retirement', () => {
     const first = attachHost(leases, 'host-a')
     const firstPlacement = leases.placeClientPage('page-a', 'host-a')
     const replacementHost = attachHost(leases, 'host-a', { connectionId: 'connection-b' })
-    const firstRetirement = leases.beginPageRetirement('page-a', firstPlacement)
 
-    expect(leases.cancelPageRetirement(firstRetirement)).toBe(false)
-    expect(leases.completePageRetirement(firstRetirement)).toBe(true)
+    // The replacing attach fenced the first lease, which released its page outright.
+    expect(leases.getPlacement('page-a')).toBeUndefined()
     const replacement = leases.placeClientPage('page-a', 'host-a')
 
     first.release()
 
     expect(leases.getPlacement('page-a')).toBe(replacement)
+    expect(
+      leases.completePageRetirement({ browserPageId: 'page-a', placement: firstPlacement })
+    ).toBe(false)
     const replacementRetirement = leases.beginPageRetirement('page-a', replacement)
     expect(leases.cancelPageRetirement(replacementRetirement)).toBe(true)
     replacementHost.release()
   })
 
-  it('retains placement capacity until exact retirement completion', () => {
+  it('reclaims placement capacity on retirement completion and on lease fencing', () => {
     const leases = registry()
     const host = attachHost(leases, 'host-a')
     const placements = Array.from({ length: 256 }, (_, index) =>
       leases.placeClientPage(`page-${index}`, 'host-a')
     )
 
-    host.release()
-
     expect(() => leases.placeServerPage('page-overflow')).toThrow('browser_page_placement_capacity')
     const retirement = leases.beginPageRetirement('page-0', placements[0]!)
-    expect(leases.cancelPageRetirement(retirement)).toBe(false)
+    expect(() => leases.placeServerPage('page-overflow')).toThrow('browser_page_placement_capacity')
     expect(leases.completePageRetirement(retirement)).toBe(true)
     expect(leases.placeServerPage('page-after-cleanup')).toEqual({ kind: 'server' })
+
+    host.release()
+
+    expect(leases.getPlacement('page-1')).toBeUndefined()
+    expect(leases.placeServerPage('page-after-fence')).toEqual({ kind: 'server' })
   })
 })
