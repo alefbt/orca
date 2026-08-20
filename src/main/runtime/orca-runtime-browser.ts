@@ -1887,6 +1887,15 @@ export class RuntimeBrowserCommands {
         )
       }
       await offscreen.closeTab(resolvedTabId)
+      // Why: closeTab only destroys the guest; without retirement, paired clients keep a
+      // dead session tab until an unrelated republish (closeMobileSessionTab already retires).
+      if (worktreeId) {
+        if (this.host.retireRuntimeOwnedBrowserSessionTab) {
+          this.host.retireRuntimeOwnedBrowserSessionTab(worktreeId, resolvedTabId)
+        } else {
+          this.host.notifyHeadlessBrowserSessionTabsChanged?.(worktreeId)
+        }
+      }
       return { closed: true }
     }
 

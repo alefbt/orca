@@ -108,6 +108,7 @@ describe('RuntimeBrowserCommands headless close and forwarding', () => {
     const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
     webContentsFromIdMock.mockReturnValue({ isDestroyed: () => false })
     const closeTab = vi.fn(async () => {})
+    const retireRuntimeOwnedBrowserSessionTab = vi.fn()
     const bridge = {
       getRegisteredTabs: vi.fn(() => new Map([['page-offscreen', 202]])),
       getActivePageId: vi.fn(() => 'page-offscreen'),
@@ -117,7 +118,8 @@ describe('RuntimeBrowserCommands headless close and forwarding', () => {
       createHost({
         getAgentBrowserBridge: () => bridge,
         getAvailableAuthoritativeWindow: vi.fn(() => null),
-        getOffscreenBrowserBackend: vi.fn(() => ({ createTab: vi.fn(), closeTab }))
+        getOffscreenBrowserBackend: vi.fn(() => ({ createTab: vi.fn(), closeTab })),
+        retireRuntimeOwnedBrowserSessionTab
       })
     )
 
@@ -125,11 +127,14 @@ describe('RuntimeBrowserCommands headless close and forwarding', () => {
       commands.browserTabClose({ worktree: 'id:wt-1', page: 'page-offscreen' })
     ).resolves.toEqual({ closed: true })
     expect(closeTab).toHaveBeenCalledWith('page-offscreen')
+    // Why: without retirement, paired clients keep a dead session tab after an RPC close.
+    expect(retireRuntimeOwnedBrowserSessionTab).toHaveBeenCalledWith('wt-1', 'page-offscreen')
     expect(ipcMainOnMock).not.toHaveBeenCalledWith('browser:tabCloseReply', expect.anything())
     await expect(
       commands.browserTabClose({ worktree: 'id:wt-1', page: 'page-other' })
     ).rejects.toMatchObject({ code: 'browser_tab_not_found' })
     expect(closeTab).toHaveBeenCalledTimes(1)
+    expect(retireRuntimeOwnedBrowserSessionTab).toHaveBeenCalledTimes(1)
   })
 
   it('closes the active headless tab on an implicit close', async () => {
