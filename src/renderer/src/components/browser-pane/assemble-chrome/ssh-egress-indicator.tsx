@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Globe, Monitor, Network } from 'lucide-react'
+import { Globe, Monitor, Server } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID } from '@/lib/settings-navigation-types'
 import {
   isRuntimeOwnedSshTargetId,
@@ -50,20 +51,27 @@ export function SshEgressIndicator({
       })
   return (
     <Popover modal={false} open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-          aria-label={description}
-          title={description}
-          data-testid="ssh-egress-indicator"
-          data-egress={routed ? 'ssh' : 'local'}
-          // Why: the address bar form focuses its input on any click inside it.
-          onClick={(event) => event.stopPropagation()}
-        >
-          {routed ? <Network className="size-4" /> : <Monitor className="size-4" />}
-        </button>
-      </PopoverTrigger>
+      {/* Why: suppress the hover tooltip while the popover is open — both anchor below the icon and would overlap. */}
+      <Tooltip open={open ? false : undefined}>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+              aria-label={description}
+              data-testid="ssh-egress-indicator"
+              data-egress={routed ? 'ssh' : 'local'}
+              // Why: the address bar form focuses its input on any click inside it.
+              onClick={(event) => event.stopPropagation()}
+            >
+              {routed ? <Server className="size-4" /> : <Monitor className="size-4" />}
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={8}>
+          {description}
+        </TooltipContent>
+      </Tooltip>
       <PopoverContent
         side="bottom"
         align="start"

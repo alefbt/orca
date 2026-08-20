@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore } from '@/store'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { BROWSER_SSH_WORKSPACE_ROUTING_SETTINGS_TARGET_ID } from '@/lib/settings-navigation-types'
 
 const mocks = vi.hoisted(() => ({
@@ -15,6 +16,14 @@ vi.mock('@/lib/worktree-runtime-owner', () => ({
 import { SshEgressIndicator } from './ssh-egress-indicator'
 
 type SetState = Parameters<typeof useAppStore.setState>[0]
+
+function renderIndicator(worktreeId: string): ReturnType<typeof render> {
+  return render(
+    <TooltipProvider>
+      <SshEgressIndicator worktreeId={worktreeId} />
+    </TooltipProvider>
+  )
+}
 
 describe('SshEgressIndicator', () => {
   let priorSettings: ReturnType<typeof useAppStore.getState>['settings']
@@ -33,13 +42,13 @@ describe('SshEgressIndicator', () => {
 
   it('keeps the plain globe for non-SSH workspaces', () => {
     mocks.executionHostId = 'local'
-    render(<SshEgressIndicator worktreeId="wt-1" />)
+    renderIndicator('wt-1')
     expect(screen.queryByTestId('ssh-egress-indicator')).toBeNull()
   })
 
   it('shows the routed icon with the host in its label for SSH workspaces', () => {
     mocks.executionHostId = 'ssh:target-a'
-    render(<SshEgressIndicator worktreeId="wt-1" />)
+    renderIndicator('wt-1')
     const icon = screen.getByTestId('ssh-egress-indicator')
     expect(icon.getAttribute('data-egress')).toBe('ssh')
     expect(icon.getAttribute('aria-label')).toContain('openclaw')
@@ -50,10 +59,17 @@ describe('SshEgressIndicator', () => {
     useAppStore.setState({
       settings: { ...priorSettings, browserSshWorkspaceRoutingDisabledTargetIds: ['target-a'] }
     } as SetState)
-    render(<SshEgressIndicator worktreeId="wt-1" />)
+    renderIndicator('wt-1')
     const icon = screen.getByTestId('ssh-egress-indicator')
     expect(icon.getAttribute('data-egress')).toBe('local')
     expect(icon.getAttribute('aria-label')).toContain('from this device')
+  })
+
+  it('shows the styled tooltip on focus/hover', () => {
+    mocks.executionHostId = 'ssh:target-a'
+    renderIndicator('wt-1')
+    fireEvent.focus(screen.getByTestId('ssh-egress-indicator'))
+    expect(screen.getByRole('tooltip').textContent).toContain('openclaw')
   })
 
   it('expands an explanation on click whose settings link deep-links to the routing setting', () => {
@@ -66,7 +82,7 @@ describe('SshEgressIndicator', () => {
     }
     useAppStore.setState({ openSettingsTarget, openSettingsPage } as unknown as SetState)
     try {
-      render(<SshEgressIndicator worktreeId="wt-1" />)
+      renderIndicator('wt-1')
       fireEvent.click(screen.getByTestId('ssh-egress-indicator'))
       const link = screen.getByTestId('ssh-egress-indicator-settings')
       fireEvent.click(link)
