@@ -5,6 +5,7 @@ import {
   selectBrowserProfile,
   type DetectedBrowser
 } from './browser-cookie-import'
+import { recordClientRouteCookieImportSource } from './client-route-cookie-import-source-store'
 import { currentBrowserRoutePartitionBindingStore } from './browser-route-partition-binding-runtime'
 import { resolveBrowserRoutePartitionBinding } from './browser-route-partition-migration'
 import { browserSessionRegistry } from './browser-session-registry'
@@ -62,10 +63,17 @@ export async function importCookiesIntoClientRoutePartition(
   if (!result.ok) {
     return result
   }
-  browserSessionRegistry.updateProfileSource(request.browserProfileId, {
-    browserFamily: browser.source.family,
-    profileName: importedProfileName(browser.source),
-    importedAt: Date.now()
+  // Why: per-environment, not the local registry — the badge must describe the jar
+  // that received the cookies (this desktop's route partition for THIS server),
+  // never the local profile jar the import deliberately bypassed.
+  recordClientRouteCookieImportSource({
+    environmentId: request.environmentId,
+    profileId: request.browserProfileId,
+    source: {
+      browserFamily: browser.source.family,
+      profileName: importedProfileName(browser.source),
+      importedAt: Date.now()
+    }
   })
   return { ...result, profileId: request.browserProfileId }
 }

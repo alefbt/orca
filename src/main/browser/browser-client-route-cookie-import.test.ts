@@ -7,8 +7,8 @@ const {
   getRouteIdentityMock,
   importCookiesFromBrowserMock,
   requireRouteBrowserProfileMock,
-  selectBrowserProfileMock,
-  updateProfileSourceMock
+  recordClientRouteImportSourceMock,
+  selectBrowserProfileMock
 } = vi.hoisted(() => ({
   bindingStore: {
     get: vi.fn(() => null as string | null),
@@ -22,8 +22,8 @@ const {
   getRouteIdentityMock: vi.fn(),
   importCookiesFromBrowserMock: vi.fn(),
   requireRouteBrowserProfileMock: vi.fn(),
-  selectBrowserProfileMock: vi.fn(),
-  updateProfileSourceMock: vi.fn()
+  recordClientRouteImportSourceMock: vi.fn(),
+  selectBrowserProfileMock: vi.fn()
 }))
 
 vi.mock('./browser-cookie-import', () => ({
@@ -37,9 +37,11 @@ vi.mock('./browser-route-partition-binding-runtime', () => ({
 vi.mock('./browser-session-registry', () => ({
   browserSessionRegistry: {
     getProfile: getProfileMock,
-    requireRouteBrowserProfile: requireRouteBrowserProfileMock,
-    updateProfileSource: updateProfileSourceMock
+    requireRouteBrowserProfile: requireRouteBrowserProfileMock
   }
+}))
+vi.mock('./client-route-cookie-import-source-store', () => ({
+  recordClientRouteCookieImportSource: recordClientRouteImportSourceMock
 }))
 vi.mock('./paired-runtime-browser-client-host-runtime', () => ({
   getPairedRuntimeBrowserClientRouteIdentity: getRouteIdentityMock
@@ -99,10 +101,14 @@ describe('importCookiesIntoClientRoutePartition', () => {
       expect.stringMatching(/^[a-f0-9]{64}$/),
       routeIdentity.storageScope
     )
-    expect(updateProfileSourceMock).toHaveBeenCalledWith('default', {
-      browserFamily: 'chrome',
-      profileName: 'Person 1',
-      importedAt: expect.any(Number)
+    expect(recordClientRouteImportSourceMock).toHaveBeenCalledWith({
+      environmentId: 'env-a',
+      profileId: 'default',
+      source: {
+        browserFamily: 'chrome',
+        profileName: 'Person 1',
+        importedAt: expect.any(Number)
+      }
     })
   })
 
@@ -147,7 +153,7 @@ describe('importCookiesIntoClientRoutePartition', () => {
       ok: false,
       reason: 'locked database'
     })
-    expect(updateProfileSourceMock).not.toHaveBeenCalled()
+    expect(recordClientRouteImportSourceMock).not.toHaveBeenCalled()
   })
 
   // Why: the import takes seconds; a host replacement inside that window retargets the route, so
@@ -162,7 +168,7 @@ describe('importCookiesIntoClientRoutePartition', () => {
       reason: 'This server was re-paired during the import. Try again.'
     })
     expect(importCookiesFromBrowserMock).toHaveBeenCalledOnce()
-    expect(updateProfileSourceMock).not.toHaveBeenCalled()
+    expect(recordClientRouteImportSourceMock).not.toHaveBeenCalled()
   })
 
   it('fails the import when the client host is retired mid-import', async () => {
@@ -174,7 +180,7 @@ describe('importCookiesIntoClientRoutePartition', () => {
       ok: false,
       reason: 'The connection to this server ended during the import. Reconnect and try again.'
     })
-    expect(updateProfileSourceMock).not.toHaveBeenCalled()
+    expect(recordClientRouteImportSourceMock).not.toHaveBeenCalled()
   })
 
   // Why: the durable identity outlives a remote restart, so a reconnect must not fail the import.
@@ -186,7 +192,7 @@ describe('importCookiesIntoClientRoutePartition', () => {
     })
 
     expect(await importCookiesIntoClientRoutePartition(request)).toMatchObject({ ok: true })
-    expect(updateProfileSourceMock).toHaveBeenCalled()
+    expect(recordClientRouteImportSourceMock).toHaveBeenCalled()
   })
 
   it('rejects an unknown browser session profile', async () => {

@@ -150,6 +150,10 @@ export type BrowserApi = {
     browserFamily: string
     browserProfile?: string
   }) => Promise<BrowserCookieImportResult | null>
+  /** Import-source badges for one environment's client-hosted jars, keyed by profile id. */
+  sessionClientRouteImportSources: (args: {
+    environmentId: string
+  }) => Promise<Record<string, BrowserSessionProfileSource>>
   sessionClearDefaultCookies: () => Promise<boolean>
   notifyActiveTabChanged: (args: { browserPageId: string }) => Promise<boolean>
 }
