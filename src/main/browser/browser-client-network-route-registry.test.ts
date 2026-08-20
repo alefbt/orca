@@ -346,7 +346,71 @@ describe('BrowserClientNetworkRouteRegistry', () => {
     expect(vi.getTimerCount()).toBe(0)
     await registry.close()
   })
+
+  it('mints a fresh route for a retain that lands while the previous one is closing', async () => {
+    const teardown = deferredTeardown()
+    const closing = createRoute()
+    closing.close.mockImplementation(() => teardown.promise)
+    closing.reconnect.mockRejectedValue(new Error('Browser network route is closed'))
+    const replacement = createRoute(Promise.resolve({ host: '127.0.0.1', port: 43124 }))
+    const routeFactory = vi.fn(() => (routeFactory.mock.calls.length > 1 ? replacement : closing))
+    const registry = new BrowserClientNetworkRouteRegistry({ authority, createRoute: routeFactory })
+    const key = browserNetworkExecutionHostKey({
+      kind: 'ssh',
+      targetId: 'target-a',
+      providerEpoch: 'provider-a',
+      connectionGeneration: 2
+    })
+    const retained = await registry.retain(key, signal())
+
+    const releasing = retained.release()
+    const retaining = registry.retain(key, signal())
+    teardown.resolve()
+
+    await releasing
+    await expect(retaining).resolves.toMatchObject({ proxyEndpoint: { port: 43124 } })
+    expect(closing.reconnect).not.toHaveBeenCalled()
+    expect(replacement.start).toHaveBeenCalledOnce()
+    await registry.close()
+  })
+
+  it('waits for a route still closing before reporting retirement', async () => {
+    const teardown = deferredTeardown()
+    const route = createRoute()
+    route.close.mockImplementation(() => teardown.promise)
+    const registry = new BrowserClientNetworkRouteRegistry({
+      authority,
+      createRoute: vi.fn(() => route)
+    })
+    const key = browserNetworkExecutionHostKey({
+      kind: 'native',
+      runtimeId: 'runtime-a',
+      revision: 7
+    })
+    const retained = await registry.retain(key, signal())
+
+    const releasing = retained.release()
+    let retired = false
+    void registry.retire().then(() => {
+      retired = true
+    })
+    await Promise.resolve()
+
+    expect(retired).toBe(false)
+    teardown.resolve()
+    await releasing
+    await registry.retire()
+    expect(retired).toBe(true)
+  })
 })
+
+function deferredTeardown(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = (): void => {}
+  const promise = new Promise<void>((innerResolve) => {
+    resolve = innerResolve
+  })
+  return { promise, resolve }
+}
 
 function createRoute(
   started: Promise<{ host: string; port: number }> = Promise.resolve({
