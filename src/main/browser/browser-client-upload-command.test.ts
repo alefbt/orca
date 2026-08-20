@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -110,7 +111,9 @@ describe('executeBrowserClientUploadCommand', () => {
       })
     ).rejects.toThrow('browser_client_file_channel_unsupported')
     expect(run).not.toHaveBeenCalled()
-    expect(await readdir(stagingRoot)).toHaveLength(0)
+    // Why: staging sweeps the root on construction, so an untouched root is one that never existed.
+    expect(staging.activeStagingCount()).toBe(0)
+    expect(existsSync(stagingRoot)).toBe(false)
   })
 
   it('removes staged files when the upload itself fails', async () => {
