@@ -30,7 +30,12 @@ export type RemoteBrowserContextMenu = {
   selectionText: string
 }
 
+export const REMOTE_BROWSER_FIND_UNAVAILABLE_NOTICE_ID = 'remote-browser-find-unavailable'
+
 export type RemoteBrowserPaneNotice = {
+  // Identifies a notice that can be re-raised or retracted by whoever set it; an unidentified
+  // notice is a one-off.
+  id?: string
   kind: 'direct' | 'consequence'
   text: string
 }

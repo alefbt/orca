@@ -190,7 +190,12 @@ export function RemoteBrowserPagePane({
     addressBarInputRef,
     guestFocus
   })
-  useRemoteBrowserPageChromeChords({ isActive, runRemoteNavigation, setPaneNotice })
+  useRemoteBrowserPageChromeChords({
+    chromeShortcutScope,
+    workspaceId,
+    runRemoteNavigation,
+    setPaneNotice
+  })
 
   // Why: focus given to the pane before the first frame can only land on the viewport, but the
   // screencast <img> is what carries key input — hand it over as soon as there is one.

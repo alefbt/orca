@@ -3,14 +3,20 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import type { BrowserPage } from '../../../../../shared/browser-workspace-types'
-import { REMOTE_BROWSER_STREAM_LIVE } from './remote-browser-stream-status'
+import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-types'
+import {
+  REMOTE_BROWSER_STREAM_LIVE,
+  type RemoteBrowserStreamStatus
+} from './remote-browser-stream-status'
 
 // Everything the streamed pane wraps is inert here; this suite is about which chords the pane
 // answers itself instead of forwarding to the remote page as raw keystrokes.
 const mocks = vi.hoisted(() => ({
   runRemoteNavigation: vi.fn(async () => {}),
   handleRemoteScreenshotKeyDown: vi.fn(),
-  remoteError: { current: null as string | null }
+  remoteError: { current: null as string | null },
+  streamStatus: { current: null as RemoteBrowserStreamStatus | null },
+  viewportRenders: { current: 0 }
 }))
 
 vi.mock('@/runtime/runtime-rpc-client', () => ({
@@ -36,7 +42,7 @@ vi.mock('../annotate/useMarkupMode', () => ({
 vi.mock('./use-remote-browser-page-lifecycle', () => ({
   useRemoteBrowserPageLifecycle: () => ({
     lifecycle: { session: {}, tokens: {} },
-    streamStatus: REMOTE_BROWSER_STREAM_LIVE,
+    streamStatus: mocks.streamStatus.current ?? REMOTE_BROWSER_STREAM_LIVE,
     frameUrl: 'blob:frame',
     frameMetadata: null,
     runtimeWorktree: 'worktree-a',
@@ -112,6 +118,7 @@ vi.mock('./remote-browser-page-viewport', () => ({
     remoteError: string | null
   }) => {
     mocks.remoteError.current = remoteError
+    mocks.viewportRenders.current += 1
     return (
       <div ref={remoteViewportRef} tabIndex={-1} data-testid="viewport">
         <img
@@ -136,16 +143,23 @@ beforeEach(() => {
     value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'
   })
   mocks.remoteError.current = null
+  mocks.streamStatus.current = null
+  mocks.viewportRenders.current = 0
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: { ui: { onFocusBrowserAddressBar: () => () => {} } }
   })
+})
+
+// isActive stays true for the active tab of every split group, so the scope is what separates the
+// focused pane from a background one (#11348).
+function renderPane(chromeShortcutScope: BrowserChromeShortcutScope = 'focused'): void {
   render(
     <TooltipProvider>
       <RemoteBrowserPagePane
         browserTab={page()}
         workspaceId="workspace-a"
-        chromeShortcutScope="focused"
+        chromeShortcutScope={chromeShortcutScope}
         runtimeEnvironmentId="environment-a"
         worktreeId="worktree-a"
         isActive
@@ -154,7 +168,7 @@ beforeEach(() => {
       />
     </TooltipProvider>
   )
-})
+}
 
 afterEach(() => {
   cleanup()
@@ -163,6 +177,7 @@ afterEach(() => {
 
 describe('streamed browser pane chrome chords', () => {
   it('reloads through the remote navigation action instead of forwarding the keystroke', () => {
+    renderPane()
     act(() => {
       fireEvent.keyDown(screen.getByTestId('frame'), { key: 'r', metaKey: true })
     })
@@ -174,6 +189,7 @@ describe('streamed browser pane chrome chords', () => {
   })
 
   it('also reloads for the hard-reload chord, which the runtime has no separate action for', () => {
+    renderPane()
     act(() => {
       fireEvent.keyDown(screen.getByTestId('frame'), { key: 'r', metaKey: true, shiftKey: true })
     })
@@ -183,6 +199,7 @@ describe('streamed browser pane chrome chords', () => {
   })
 
   it('reloads from the chrome too, not only from the focused frame', () => {
+    renderPane()
     act(() => {
       window.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'r', metaKey: true, bubbles: true, cancelable: true })
@@ -193,6 +210,7 @@ describe('streamed browser pane chrome chords', () => {
   })
 
   it('leaves reload alone while the user is typing in the address bar', () => {
+    renderPane()
     const addressBar = screen.getByRole('combobox')
     addressBar.focus()
 
@@ -204,6 +222,7 @@ describe('streamed browser pane chrome chords', () => {
   })
 
   it('says find is unavailable rather than forwarding a chord that does nothing', () => {
+    renderPane()
     act(() => {
       fireEvent.keyDown(screen.getByTestId('frame'), { key: 'f', metaKey: true })
     })
@@ -215,7 +234,118 @@ describe('streamed browser pane chrome chords', () => {
     expect(mocks.runRemoteNavigation).not.toHaveBeenCalled()
   })
 
+  // Why: #11348 — a streamed pane in a background split is still isActive, so gating on isActive
+  // would swallow the chord out from under a focused terminal in the sibling split.
+  it('leaves find to the focused split when this pane is not the focused one', () => {
+    renderPane('inactive')
+    const event = new KeyboardEvent('keydown', {
+      key: 'f',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true
+    })
+
+    act(() => {
+      window.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mocks.remoteError.current).toBeNull()
+  })
+
+  it('leaves reload to the focused split when this pane is not the focused one', () => {
+    renderPane('inactive')
+    const event = new KeyboardEvent('keydown', {
+      key: 'r',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true
+    })
+
+    act(() => {
+      window.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mocks.runRemoteNavigation).not.toHaveBeenCalled()
+  })
+
+  // With no focused group known, only chords raised from inside this pane's own overlay count.
+  it('answers an owned-target chord only when the event comes from its own overlay', () => {
+    renderPane('owned-target')
+    const outside = document.createElement('div')
+    outside.setAttribute('data-browser-overlay-tab-id', 'workspace-b')
+    document.body.append(outside)
+
+    act(() => {
+      fireEvent.keyDown(outside, { key: 'f', metaKey: true })
+    })
+
+    expect(mocks.remoteError.current).toBeNull()
+
+    const inside = document.createElement('div')
+    inside.setAttribute('data-browser-overlay-tab-id', 'workspace-a')
+    document.body.append(inside)
+
+    act(() => {
+      fireEvent.keyDown(inside, { key: 'f', metaKey: true })
+    })
+
+    expect(mocks.remoteError.current).toBe(
+      'Find in page is not available while this page streams from the remote host.'
+    )
+  })
+
+  it('lets a stream error outrank the find notice next to the reconnect control', () => {
+    mocks.streamStatus.current = { kind: 'stopped', notice: 'The connection to the page was lost.' }
+    renderPane()
+
+    act(() => {
+      fireEvent.keyDown(screen.getByTestId('frame'), { key: 'f', metaKey: true })
+    })
+
+    expect(mocks.remoteError.current).toBe('The connection to the page was lost.')
+  })
+
+  it('retracts the find notice on its own', () => {
+    vi.useFakeTimers()
+    try {
+      renderPane()
+      act(() => {
+        fireEvent.keyDown(screen.getByTestId('frame'), { key: 'f', metaKey: true })
+      })
+      expect(mocks.remoteError.current).not.toBeNull()
+
+      act(() => {
+        vi.advanceTimersByTime(4000)
+      })
+
+      expect(mocks.remoteError.current).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Why: OS key repeat fires keydown per repeat, and re-setting the notice would re-render the
+  // screencast image each time.
+  it('does not re-render the viewport while the find chord is held down', () => {
+    renderPane()
+    act(() => {
+      fireEvent.keyDown(screen.getByTestId('frame'), { key: 'f', metaKey: true })
+    })
+    const rendersAfterFirstNotice = mocks.viewportRenders.current
+
+    act(() => {
+      for (let repeat = 0; repeat < 5; repeat += 1) {
+        fireEvent.keyDown(screen.getByTestId('frame'), { key: 'f', metaKey: true, repeat: true })
+      }
+    })
+
+    expect(mocks.viewportRenders.current).toBe(rendersAfterFirstNotice)
+  })
+
   it('still forwards ordinary typing to the remote page', () => {
+    renderPane()
     act(() => {
       fireEvent.keyDown(screen.getByTestId('frame'), { key: 'r' })
     })
