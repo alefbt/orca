@@ -300,6 +300,7 @@ describe.each([
   { tree: 'under StrictMode', strict: true }
 ])('BrowserPane adoption keeps live address-bar chrome ($tree)', ({ strict }) => {
   let webview: ReturnType<typeof createWebview>
+  let liveAttachment: { detached: boolean } | null = null
 
   beforeEach(() => {
     strictMode = strict
@@ -310,13 +311,26 @@ describe.each([
     })
     vi.stubGlobal('cancelAnimationFrame', () => {})
     webview = createWebview()
+    liveAttachment = null
     mocks.attach.mockReset().mockImplementation((_args: unknown, viewport: HTMLElement) => {
+      // Why the double claim throws here too: production's visible-attachment claim refuses a page
+      // another attachment still holds, so a pane that re-attaches before detaching strands itself
+      // on the unavailable notice. A mock that always succeeds cannot see that ordering break.
+      if (liveAttachment?.detached === false) {
+        throw new Error('browser_client_page_renderer_visible_page_claimed')
+      }
       viewport.appendChild(webview)
-      return {
+      const attachment = {
         webview,
-        detach: vi.fn(() => webview.remove()),
+        detached: false,
+        detach: vi.fn(() => {
+          attachment.detached = true
+          webview.remove()
+        }),
         nextMetadataRevision: vi.fn(() => 1)
       }
+      liveAttachment = attachment
+      return attachment
     })
     mocks.ensureRemotePage.mockClear()
     mocks.callRuntimeRpc.mockClear()
@@ -607,6 +621,8 @@ describe.each([
     expect(stale.detach.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.attach.mock.invocationCallOrder.at(-1) as number
     )
+    // The claim the attach double models: out of order it throws, and this is where that lands.
+    expect(screen.queryByText('Client-hosted browser unavailable')).toBeNull()
     // ...without rebuilding the chrome around it, which is what the key change bought.
     expect(addressBar()).toBe(bar)
   })
