@@ -817,10 +817,15 @@ export async function createWebRuntimeSessionBrowserTab(args: {
       }
     }
     if (!materialized) {
-      // Why: a close landing after this point needs no separate cancel check — materialization
-      // already requires the workspace row, so an unwound staged tab lands here and takes the same
-      // cleanup path.
       throw new Error('The created browser tab did not materialize in the client.')
+    }
+    // Why: materialization only proves *some* workspace in this worktree carries the page — when the
+    // host mirrors it under its own id, the predicate goes true even though the staged row the user
+    // X-ed is gone. The whole materialization wait above is a live window for that X, so re-check the
+    // row here before the stage is surrendered, or the create reports success and never retires the
+    // host page.
+    if (staged && !isStagedWebRuntimeBrowserTabLive(staged, args.worktreeId)) {
+      throw new StagedWebRuntimeBrowserTabCancelledError()
     }
     // Why: materialization means the snapshot has taken ownership of these rows, so nothing
     // downstream may still unwind them as an optimistic stage.

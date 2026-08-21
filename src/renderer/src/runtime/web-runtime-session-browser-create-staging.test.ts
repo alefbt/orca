@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWebRuntimeSessionBrowserTab } from './web-runtime-session'
 import { discardStagedWebRuntimeBrowserTab } from './web-runtime-browser-tab-staging'
 import { resetWebSessionCloseIntentForTests } from './web-session-close-intent'
+import type * as BrowserMaterializationModule from './web-runtime-browser-materialization'
 import {
   ENVIRONMENT_ID,
   WORKTREE_ID,
@@ -92,6 +93,43 @@ function closeStagedWorkspace(workspaceId: string): void {
       (workspace: { id: string }) => workspace.id !== workspaceId
     )
   }
+}
+
+/** The host publishing the page under a workspace id of its own, beside this client's rows. */
+function mirrorHostPage(workspaceId: string, remotePageId: string): void {
+  const state = mocks.getState()
+  state.browserPagesByWorkspace[workspaceId] = [
+    { id: remotePageId, workspaceId, url: 'https://example.com/' }
+  ]
+  state.browserTabsByWorktree[WORKTREE_ID] = [
+    ...(state.browserTabsByWorktree[WORKTREE_ID] ?? []),
+    {
+      id: workspaceId,
+      worktreeId: WORKTREE_ID,
+      activePageId: remotePageId,
+      pageIds: [remotePageId]
+    }
+  ]
+  state.remoteBrowserPageHandlesByPageId[remotePageId] = {
+    environmentId: ENVIRONMENT_ID,
+    remotePageId
+  }
+  state.unifiedTabsByWorktree[WORKTREE_ID] = [
+    ...(state.unifiedTabsByWorktree[WORKTREE_ID] ?? []),
+    { id: `${workspaceId}-tab`, entityId: workspaceId, contentType: 'browser' }
+  ]
+}
+
+function forgetHostPage(workspaceId: string, remotePageId: string): void {
+  const state = mocks.getState()
+  delete state.browserPagesByWorkspace[workspaceId]
+  delete state.remoteBrowserPageHandlesByPageId[remotePageId]
+  state.browserTabsByWorktree[WORKTREE_ID] = (
+    state.browserTabsByWorktree[WORKTREE_ID] ?? []
+  ).filter((workspace: { id: string }) => workspace.id !== workspaceId)
+  state.unifiedTabsByWorktree[WORKTREE_ID] = (
+    state.unifiedTabsByWorktree[WORKTREE_ID] ?? []
+  ).filter((tab: { entityId: string }) => tab.entityId !== workspaceId)
 }
 
 function runtimeRequests(runtimeCall: {
@@ -335,6 +373,52 @@ describe('createWebRuntimeSessionBrowserTab optimistic staging', () => {
     // Why: the cancelling close already dropped the handle, so the unwind must not fire a second
     // teardown for rows that are gone.
     expect(stagedBrowserTabMocks.closeBrowserTab).not.toHaveBeenCalled()
+  })
+
+  // Why: materialization asks whether *some* workspace in the worktree carries the page, not whether
+  // the staged one does. A host that mirrors the page under its own workspace id answers yes for a
+  // tab the user already X-ed, so a single pre-wait liveness check lets the create report success and
+  // walk past the cleanup that owes the host a tabClose.
+  it('cancels when the close lands while the host mirrors the page under its own workspace', async () => {
+    const { hasMaterializedWebRuntimeBrowserPage: realPredicate } = await vi.importActual<
+      typeof BrowserMaterializationModule
+    >('./web-runtime-browser-materialization')
+    mocks.hasMaterializedWebRuntimeBrowserPage.mockImplementation(realPredicate)
+    let cancelled = false
+    const runtimeCall = vi.fn((request: { method: string; params: { page?: string } }) => {
+      if (request.method === 'browser.tabCreate') {
+        return Promise.resolve({ id: 'create', ok: true, result: { browserPageId: 'host-page-1' } })
+      }
+      if (request.method === 'browser.tabClose') {
+        forgetHostPage('host-workspace-9', 'host-page-1')
+        return Promise.resolve({ id: 'close', ok: true, result: { closed: true } })
+      }
+      // The X lands after the pre-wait check has already passed, and the host's own snapshot row
+      // arrives in the same window — exactly the state the materialization wait sits in.
+      if (!cancelled) {
+        cancelled = true
+        closeStagedWorkspace('staged-workspace-1')
+        mirrorHostPage('host-workspace-9', 'host-page-1')
+      }
+      return Promise.resolve({ id: 'list', ok: true, result: makeSnapshot() })
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(
+      createWebRuntimeSessionBrowserTab({
+        worktreeId: WORKTREE_ID,
+        environmentId: ENVIRONMENT_ID
+      })
+    ).resolves.toBe(false)
+
+    expect(calledMethods(runtimeCall)).toEqual([
+      'browser.tabCreate',
+      'session.tabs.list',
+      'browser.tabClose',
+      'session.tabs.list'
+    ])
+    expect(closedHostPages(runtimeCall)).toEqual(['host-page-1'])
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([])
   })
 
   // Why: with a known-id host nothing rehomes, so `staged` still points at rows a snapshot may
