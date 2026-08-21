@@ -20,7 +20,8 @@ type PaneGroup = {
 type PaneSnapshot = {
   activeGroupId: string | null
   groups: PaneGroup[]
-  tabs: { contentType: string; groupId: string; id: string; label: string }[]
+  layoutGroupIds: string[]
+  tabs: { contentType: string; entityId: string; groupId: string; id: string; label: string }[]
 }
 
 type PairedFixture = {
@@ -92,6 +93,21 @@ async function findPairedWorktreeId(page: Page, repoPath: string): Promise<strin
 async function readPanes(page: Page, worktreeId: string): Promise<PaneSnapshot> {
   return page.evaluate((id) => {
     const state = window.__store?.getState()
+    const layoutGroupIds: string[] = []
+    const visitLayout = (node: unknown): void => {
+      if (!node || typeof node !== 'object') {
+        return
+      }
+      const leaf = node as { groupId?: string; type?: string }
+      if (leaf.type === 'leaf' && leaf.groupId) {
+        layoutGroupIds.push(leaf.groupId)
+        return
+      }
+      const split = node as { first?: unknown; second?: unknown }
+      visitLayout(split.first)
+      visitLayout(split.second)
+    }
+    visitLayout(state?.layoutByWorktree[id] ?? null)
     return {
       activeGroupId: state?.activeGroupIdByWorktree[id] ?? null,
       groups: (state?.groupsByWorktree[id] ?? []).map((group) => ({
@@ -99,8 +115,10 @@ async function readPanes(page: Page, worktreeId: string): Promise<PaneSnapshot> 
         id: group.id,
         tabOrder: [...group.tabOrder]
       })),
+      layoutGroupIds,
       tabs: (state?.unifiedTabsByWorktree[id] ?? []).map((tab) => ({
         contentType: tab.contentType,
+        entityId: tab.entityId,
         groupId: tab.groupId,
         id: tab.id,
         label: tab.label
@@ -361,6 +379,98 @@ test('creates paired split-pane tabs in the focused pane without disturbing the 
     expect(requireGroup(settled, rootGroupId).tabOrder).toEqual(leftBefore.tabOrder)
     expect(requireGroup(settled, rightGroupId).activeTabId).toBe(browserTabId)
     expect(requireGroup(settled, rightGroupId).tabOrder).toEqual([browserTabId])
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+// Why: a remote-owned browser closes on the host and never runs the local closeUnifiedTab
+// collapse, so the emptied split pane can only disappear via the snapshot reconciler.
+test('collapses the split pane when its last paired browser tab is closed from the tab strip', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+    const rightGroupId = await client.page.evaluate(
+      ({ sourceGroupId, worktreeId }) => {
+        const state = window.__store?.getState()
+        const groupId = state?.createEmptySplitGroup(worktreeId, sourceGroupId, 'right')
+        if (!groupId) {
+          throw new Error('Right split group unavailable')
+        }
+        state?.focusGroup(worktreeId, groupId)
+        return groupId
+      },
+      { sourceGroupId: rootGroupId, worktreeId }
+    )
+    await openRemoteBrowserTab(client.page, fixture.url, rightGroupId)
+    const split = await waitForGroupTabCount(
+      client.page,
+      worktreeId,
+      rightGroupId,
+      1,
+      'paired client never materialized the remote browser tab in the right pane'
+    )
+    expect(split.layoutGroupIds).toEqual([rootGroupId, rightGroupId])
+    const browserTab = split.tabs.find(
+      (tab) => tab.id === requireGroup(split, rightGroupId).tabOrder[0]
+    )
+    expect(browserTab?.contentType).toBe('browser')
+
+    // Why: a local-only close would collapse on its own, so pin the branch the strip's X really
+    // takes here — otherwise this test silently degrades into covering the local path.
+    const closeRoute = await client.page.evaluate((entityId) => {
+      const state = window.__store?.getState()
+      const pages = state?.browserPagesByWorkspace[entityId] ?? []
+      return {
+        hasLocalPages: pages.length > 0,
+        remoteOwners: [
+          ...new Set(
+            pages.flatMap((page) => {
+              const environmentId =
+                state?.remoteBrowserPageHandlesByPageId[page.id]?.environmentId?.trim() ||
+                page.browserRuntimeEnvironmentId?.trim()
+              return environmentId ? [environmentId] : []
+            })
+          )
+        ]
+      }
+    }, browserTab?.entityId ?? '')
+    expect(closeRoute).toEqual({ hasLocalPages: true, remoteOwners: [client.environmentId] })
+
+    await client.page
+      .locator(
+        `[data-tab-group-strip-id="${rightGroupId}"] [data-tab-id="${browserTab?.entityId}"] button`
+      )
+      .click()
+
+    try {
+      await expect
+        .poll(
+          async () => {
+            const panes = await readPanes(client.page, worktreeId)
+            return {
+              browserTabs: panes.tabs.filter((tab) => tab.contentType === 'browser').length,
+              groupIds: panes.groups.map((group) => group.id),
+              layoutGroupIds: panes.layoutGroupIds
+            }
+          },
+          {
+            timeout: 90_000,
+            message: 'emptied right pane never collapsed after the tab-strip close'
+          }
+        )
+        .toEqual({ browserTabs: 0, groupIds: [rootGroupId], layoutGroupIds: [rootGroupId] })
+    } catch (error) {
+      throw new Error(
+        `right pane never collapsed; panes=${JSON.stringify(await readPanes(client.page, worktreeId))}`,
+        { cause: error }
+      )
+    }
+    const collapsed = await readPanes(client.page, worktreeId)
+    expect(collapsed.activeGroupId).toBe(rootGroupId)
   } finally {
     await fixture.dispose()
   }
