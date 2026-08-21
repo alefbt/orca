@@ -34,7 +34,10 @@ export type WebRuntimeSessionMocks = {
  * Store actions the optimistic browser stage drives, owned here rather than by each test file's
  * hoisted mock object so every browser-create suite models staging the same way.
  */
-export const stagedBrowserTabMocks = {
+export const stagedBrowserTabMocks: {
+  closeBrowserTab: SessionMock
+  removeRemoteBrowserPageHandle: SessionMock
+} = {
   closeBrowserTab: vi.fn(),
   removeRemoteBrowserPageHandle: vi.fn()
 }
@@ -58,7 +61,7 @@ let stagedWorkspaceCounter = 0
 export function stagedBrowserWorkspaces(
   mocks: WebRuntimeSessionMocks
 ): { workspaceId: string; pageId: string; staged: boolean }[] {
-  const state = mocks.getState() as HarnessBrowserState
+  const state = (mocks.getState as unknown as () => HarnessBrowserState)()
   return Object.values(state.browserTabsByWorktree)
     .flat()
     .map((workspace) => ({
@@ -69,7 +72,7 @@ export function stagedBrowserWorkspaces(
 }
 
 function stubStagedBrowserTabStore(mocks: WebRuntimeSessionMocks): void {
-  const readState = (): HarnessBrowserState => mocks.getState() as HarnessBrowserState
+  const readState = mocks.getState as unknown as () => HarnessBrowserState
   mocks.createBrowserTab.mockImplementation(
     (worktreeId: string, url: string, options?: { browserPageId?: string }) => {
       stagedWorkspaceCounter += 1

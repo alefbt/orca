@@ -246,6 +246,87 @@ describe('buildWorkspaceSessionPayload', () => {
     expect(payload.activeGroupIdByWorktree?.['wt-1']).toBe('group-left')
   })
 
+  it('does not persist a browser tab whose create never materialized', () => {
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        browserTabsByWorktree: {
+          'wt-1': [
+            {
+              id: 'browser-1',
+              activePageId: 'page-1',
+              pageIds: ['page-1'],
+              worktreeId: 'wt-1'
+            } as never,
+            {
+              id: 'staged-1',
+              activePageId: 'staged-page',
+              pageIds: ['staged-page'],
+              worktreeId: 'wt-1'
+            } as never
+          ]
+        },
+        browserPagesByWorkspace: {
+          'browser-1': [{ id: 'page-1', workspaceId: 'browser-1', worktreeId: 'wt-1' } as never],
+          'staged-1': [{ id: 'staged-page', workspaceId: 'staged-1', worktreeId: 'wt-1' } as never]
+        },
+        remoteBrowserPageHandlesByPageId: {
+          'page-1': { environmentId: 'env-1', remotePageId: 'remote-1' },
+          'staged-page': { environmentId: 'env-1', remotePageId: 'staged-page', staged: true }
+        },
+        activeBrowserTabIdByWorktree: { 'wt-1': 'staged-1' },
+        unifiedTabsByWorktree: {
+          'wt-1': [
+            {
+              id: 'browser-unified-1',
+              entityId: 'browser-1',
+              groupId: 'group-left',
+              worktreeId: 'wt-1',
+              contentType: 'browser',
+              label: 'Example',
+              customLabel: null,
+              color: null,
+              sortOrder: 0,
+              createdAt: 1
+            },
+            {
+              id: 'staged-unified-1',
+              entityId: 'staged-1',
+              groupId: 'group-left',
+              worktreeId: 'wt-1',
+              contentType: 'browser',
+              label: 'New Tab',
+              customLabel: null,
+              color: null,
+              sortOrder: 1,
+              createdAt: 2
+            }
+          ]
+        },
+        groupsByWorktree: {
+          'wt-1': [
+            {
+              id: 'group-left',
+              worktreeId: 'wt-1',
+              activeTabId: 'staged-unified-1',
+              tabOrder: ['browser-unified-1', 'staged-unified-1']
+            }
+          ]
+        },
+        layoutByWorktree: { 'wt-1': { type: 'leaf', groupId: 'group-left' } },
+        activeGroupIdByWorktree: { 'wt-1': 'group-left' }
+      })
+    )
+
+    expect(payload.browserTabsByWorktree?.['wt-1']?.map((tab) => tab.id)).toEqual(['browser-1'])
+    expect(payload.browserPagesByWorkspace).not.toHaveProperty('staged-1')
+    expect(payload.unifiedTabs?.['wt-1']?.map((tab) => tab.id)).toEqual(['browser-unified-1'])
+    // The group must not keep a slot pointing at a tab that no longer exists.
+    expect(payload.tabGroups?.['wt-1']).toEqual([
+      expect.objectContaining({ tabOrder: ['browser-unified-1'], activeTabId: null })
+    ])
+    expect(payload.activeBrowserTabIdByWorktree?.['wt-1']).toBeNull()
+  })
+
   it('drops local terminal scrollback buffers from session payloads', () => {
     const localWorktreeId = 'repo-1::/local/worktree'
     const payload = buildWorkspaceSessionPayload(

@@ -54,6 +54,7 @@ function createSnapshot(
     activeTabTypeByWorktree: { 'wt-1': 'editor', 'wt-2': 'terminal' },
     browserTabsByWorktree: {},
     browserPagesByWorkspace: {},
+    remoteBrowserPageHandlesByPageId: {},
     activeBrowserTabIdByWorktree: {},
     browserUrlHistory: [],
     unifiedTabsByWorktree: {},
@@ -335,5 +336,34 @@ describe('buildWorkspaceSessionPatch', () => {
 
     expect(Object.hasOwn(patch, 'sleepingAgentSessionsByPaneKey')).toBe(true)
     expect(patch.sleepingAgentSessionsByPaneKey).toBeUndefined()
+  })
+
+  it('keeps a staged browser tab out of incremental patches too', () => {
+    const patch = buildWorkspaceSessionPatch(
+      createSnapshot({
+        browserTabsByWorktree: {
+          'wt-1': [
+            {
+              id: 'staged-1',
+              activePageId: 'staged-page',
+              pageIds: ['staged-page'],
+              worktreeId: 'wt-1'
+            } as never
+          ]
+        },
+        browserPagesByWorkspace: {
+          'staged-1': [{ id: 'staged-page', workspaceId: 'staged-1', worktreeId: 'wt-1' } as never]
+        },
+        remoteBrowserPageHandlesByPageId: {
+          'staged-page': { environmentId: 'env-1', remotePageId: 'staged-page', staged: true }
+        },
+        activeBrowserTabIdByWorktree: { 'wt-1': 'staged-1' }
+      }),
+      ['browserTabsByWorktree', 'browserPagesByWorkspace', 'activeBrowserTabIdByWorktree']
+    )
+
+    expect(patch.browserTabsByWorktree).toEqual({ 'wt-1': [] })
+    expect(patch.browserPagesByWorkspace).toEqual({})
+    expect(patch.activeBrowserTabIdByWorktree).toEqual({ 'wt-1': null })
   })
 })
