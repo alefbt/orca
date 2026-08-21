@@ -44,16 +44,16 @@ vi.mock('./browser-workspace-pane', () => ({
   default: ({
     browserTab,
     isActive,
-    findShortcutScope
+    chromeShortcutScope
   }: {
     browserTab: BrowserTabState
     isActive: boolean
-    findShortcutScope?: string
+    chromeShortcutScope?: string
   }) => (
     <span
       data-browser-pane-id={browserTab.id}
       data-browser-pane-active={isActive ? 'true' : 'false'}
-      data-browser-find-shortcut-scope={findShortcutScope}
+      data-browser-find-shortcut-scope={chromeShortcutScope}
     />
   )
 }))

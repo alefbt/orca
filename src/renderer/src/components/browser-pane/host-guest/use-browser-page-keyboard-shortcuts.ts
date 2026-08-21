@@ -22,7 +22,6 @@ export function useBrowserPageKeyboardShortcuts({
   showBrowserZoomFeedback,
   reloadWebviewOrRecoverGuest,
   startGrabIntent,
-  focusAddressBarNow,
   handleGrabActionShortcut,
   grabIsInteractive
 }: {
@@ -36,7 +35,6 @@ export function useBrowserPageKeyboardShortcuts({
   showBrowserZoomFeedback: (level: number) => void
   reloadWebviewOrRecoverGuest: (ignoreCache: boolean) => void
   startGrabIntent: (intent: GrabIntent) => void
-  focusAddressBarNow: () => boolean
   handleGrabActionShortcut: (key: 'c' | 's') => void
   grabIsInteractive: boolean
 }): void {
@@ -198,24 +196,6 @@ export function useBrowserPageKeyboardShortcuts({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isActive, keybindings, markupIsActive, startGrabIntent])
-
-  useEffect(() => {
-    if (!isActive) {
-      return
-    }
-    const shortcutPlatform = getShortcutPlatform()
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (!keybindingMatchesAction('browser.focusAddressBar', e, shortcutPlatform, keybindings)) {
-        return
-      }
-      // Why: capture Cmd/Ctrl+L before the workspace or an embedded editor can claim the same chord.
-      e.preventDefault()
-      e.stopPropagation()
-      focusAddressBarNow()
-    }
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [focusAddressBarNow, isActive, keybindings])
 
   // Why: a focused guest gets Cmd/Ctrl+C inside Chromium; main forwards it back only when the page wouldn't use it for native copy.
   useEffect(() => {

@@ -37,6 +37,8 @@ beforeEach(() => {
           }
         }
       },
+      // The pane's chrome-focus rules subscribe to the Cmd/Ctrl+L forward; focus has its own suite.
+      ui: { onFocusBrowserAddressBar: () => () => {} },
       runtimeEnvironments: { call: vi.fn(async () => ({})) }
     }
   })
@@ -61,6 +63,8 @@ function renderPane(): void {
             canGoForward: false
           } as never
         }
+        workspaceId="workspace-a"
+        chromeShortcutScope="focused"
         runtimeEnvironmentId="environment-a"
         worktreeId="worktree-a"
         placement={{

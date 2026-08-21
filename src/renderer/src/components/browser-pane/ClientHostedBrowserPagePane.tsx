@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import { Globe } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
+import { useAppStore } from '@/store'
 import type {
   BrowserLoadError,
   BrowserPage as BrowserPageState
@@ -20,12 +21,15 @@ import {
   reopenOnServerCaveat
 } from './ReopenBrowserPageOnServerButton'
 import { BrowserNavigationControlRow } from './assemble-chrome/browser-navigation-control-row'
+import { useBrowserPageChromeFocus } from './assemble-chrome/use-browser-page-chrome-focus'
+import { useWebviewGuestFocus } from './assemble-chrome/browser-page-guest-focus'
 import { RemoteRuntimeEgressIndicator } from './assemble-chrome/browser-egress-indicator'
 import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overlay'
 import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-bar-navigation'
 import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
-import { toDisplayUrl } from './describe-page/browser-page-url-display'
+import { getBrowserDisplayTitle, toDisplayUrl } from './describe-page/browser-page-url-display'
 import type {
+  BrowserChromeShortcutScope,
   BrowserPageFailLoadEvent,
   BrowserPageUrlSetter,
   BrowserTabPageState
@@ -33,18 +37,22 @@ import type {
 
 export function ClientHostedBrowserPagePane({
   browserTab,
+  workspaceId,
   runtimeEnvironmentId,
   worktreeId,
   placement,
   isActive,
+  chromeShortcutScope,
   onUpdatePageState,
   onSetUrl
 }: {
   browserTab: BrowserPageState
+  workspaceId: string
   runtimeEnvironmentId: string
   worktreeId: string
   placement: RuntimeBrowserClientPlacement
   isActive: boolean
+  chromeShortcutScope: BrowserChromeShortcutScope
   onUpdatePageState: (tabId: string, updates: BrowserTabPageState) => void
   onSetUrl: BrowserPageUrlSetter
 }): React.JSX.Element {
@@ -56,7 +64,19 @@ export function ClientHostedBrowserPagePane({
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const updatePageStateFromGuest = useEffectEvent(onUpdatePageState)
   const setUrlFromGuest = useEffectEvent(onSetUrl)
+  const addBrowserHistoryEntry = useAppStore((s) => s.addBrowserHistoryEntry)
+  const recordHistoryFromGuest = useEffectEvent(addBrowserHistoryEntry)
   const { browserHostClientId, browserHostGeneration, pageHostGeneration } = placement
+
+  const guestFocus = useWebviewGuestFocus(webviewRef)
+  const { keepAddressBarFocusRef } = useBrowserPageChromeFocus({
+    browserTabId: browserTab.id,
+    workspaceId,
+    isActive,
+    chromeShortcutScope,
+    addressBarInputRef,
+    guestFocus
+  })
 
   useBrowserClientHostedDownloadNotices(browserTab.id)
   useBrowserClientHostedPopupNotices(browserTab.id)
@@ -112,6 +132,9 @@ export function ClientHostedBrowserPagePane({
         loadError: activeLoadFailureRef.current
       })
       publisher.publish(metadata)
+      // Why: the address bar's suggestions read the client's shared URL history, so a page
+      // hosted here has to file its navigations there like a local guest does.
+      recordHistoryFromGuest(metadata.url, getBrowserDisplayTitle(webview.getTitle(), metadata.url))
       setAddressBarValue(toDisplayUrl(metadata.url))
     }
     const onStart = (): void => {
@@ -158,10 +181,11 @@ export function ClientHostedBrowserPagePane({
   ])
 
   useEffect(() => {
-    if (isActive) {
+    // Why: a new blank tab is claiming the address bar; focusing the guest here would yank it straight back.
+    if (isActive && !keepAddressBarFocusRef.current) {
       webviewRef.current?.focus()
     }
-  }, [isActive])
+  }, [isActive, keepAddressBarFocusRef])
 
   useEffect(() => {
     setAddressBarValue(toDisplayUrl(browserTab.url))
