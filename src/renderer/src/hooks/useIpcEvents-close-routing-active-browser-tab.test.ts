@@ -18,51 +18,42 @@ vi.mock('@/runtime/web-runtime-session', () => ({
 }))
 vi.mock('@/store/slices/browser-webview-cleanup', () => ({ destroyWorkspaceWebviews }))
 
-type ActiveBrowserTabState = {
-  closeBrowserTab: ReturnType<typeof vi.fn>
-  closeUnifiedTab: ReturnType<typeof vi.fn>
-  fire: () => void
-}
+const closeBrowserTab = vi.fn()
+const closeUnifiedTab = vi.fn()
 
-/** Mount useIpcEvents over one active browser workspace and hand back the menu's Close Tab. */
-async function mountWithActiveBrowserWorkspace(handle: {
+/** One active browser workspace, optionally held under a handle the host has not published yet. */
+function activeBrowserWorkspace(handle: {
   environmentId?: string
   staged?: true
-}): Promise<ActiveBrowserTabState> {
-  const closeBrowserTab = vi.fn()
-  const closeUnifiedTab = vi.fn()
-  const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
-  await useIpcEventsForCloseRouting({
-    closeActiveTabListenerRef: listenerRef,
-    getState: () => ({
-      activeTabType: 'browser',
-      activeBrowserTabId: 'workspace-1',
-      activeWorktreeId: 'wt-1',
-      browserTabsByWorktree: { 'wt-1': [{ id: 'workspace-1' }] },
-      browserPagesByWorkspace: {
-        'workspace-1': [{ id: 'page-1', workspaceId: 'workspace-1' }]
-      },
-      remoteBrowserPageHandlesByPageId: handle.environmentId
-        ? {
-            'page-1': {
-              environmentId: handle.environmentId,
-              remotePageId: 'remote-1',
-              ...(handle.staged ? { staged: true } : {})
-            }
+}): Record<string, unknown> {
+  return {
+    activeTabType: 'browser',
+    activeBrowserTabId: 'workspace-1',
+    activeWorktreeId: 'wt-1',
+    browserTabsByWorktree: { 'wt-1': [{ id: 'workspace-1' }] },
+    browserPagesByWorkspace: { 'workspace-1': [{ id: 'page-1', workspaceId: 'workspace-1' }] },
+    remoteBrowserPageHandlesByPageId: handle.environmentId
+      ? {
+          'page-1': {
+            environmentId: handle.environmentId,
+            remotePageId: 'remote-1',
+            ...(handle.staged ? { staged: true } : {})
           }
-        : {},
-      unifiedTabsByWorktree: {
-        'wt-1': [{ id: 'unified-1', contentType: 'browser', entityId: 'workspace-1' }]
-      },
-      closeBrowserTab,
-      closeUnifiedTab
-    })
-  })
-  const fire = listenerRef.current
-  if (!fire) {
+        }
+      : {},
+    unifiedTabsByWorktree: {
+      'wt-1': [{ id: 'unified-1', contentType: 'browser', entityId: 'workspace-1' }]
+    },
+    closeBrowserTab,
+    closeUnifiedTab
+  }
+}
+
+function requireListener(ref: { current: CloseActiveTabListener | null }): CloseActiveTabListener {
+  if (!ref.current) {
     throw new Error('onCloseActiveTab was never registered')
   }
-  return { closeBrowserTab, closeUnifiedTab, fire }
+  return ref.current
 }
 
 // Why: the menu's Close Tab used to answer ownership with "is this worktree's runtime connected",
@@ -77,11 +68,13 @@ describe('useIpcEvents Close Tab on the active browser tab', () => {
   })
 
   it('closes a host-owned workspace on its runtime and leaves the mirror to tab sync', async () => {
-    const { closeBrowserTab, closeUnifiedTab, fire } = await mountWithActiveBrowserWorkspace({
-      environmentId: 'env-a'
+    const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
+    await useIpcEventsForCloseRouting({
+      closeActiveTabListenerRef: listenerRef,
+      getState: () => activeBrowserWorkspace({ environmentId: 'env-a' })
     })
 
-    fire()
+    requireListener(listenerRef)()
 
     expect(closeWebRuntimeSessionTab).toHaveBeenCalledWith({
       worktreeId: 'wt-1',
@@ -95,9 +88,13 @@ describe('useIpcEvents Close Tab on the active browser tab', () => {
 
   // Why: a connected runtime does not make a client-local workspace the host's to close.
   it('tears a local-only workspace down here even while the runtime is connected', async () => {
-    const { closeBrowserTab, fire } = await mountWithActiveBrowserWorkspace({})
+    const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
+    await useIpcEventsForCloseRouting({
+      closeActiveTabListenerRef: listenerRef,
+      getState: () => activeBrowserWorkspace({})
+    })
 
-    fire()
+    requireListener(listenerRef)()
 
     expect(closeWebRuntimeSessionTab).not.toHaveBeenCalled()
     expect(destroyWorkspaceWebviews).toHaveBeenCalled()
@@ -107,12 +104,13 @@ describe('useIpcEvents Close Tab on the active browser tab', () => {
   // Why: a staged page names a runtime that has not minted it yet, so the host close is inert and
   // the in-flight create's snapshot puts the tab back.
   it('unwinds a staged workspace as a cleanup close instead of closing it on the host', async () => {
-    const { closeBrowserTab, fire } = await mountWithActiveBrowserWorkspace({
-      environmentId: 'env-a',
-      staged: true
+    const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
+    await useIpcEventsForCloseRouting({
+      closeActiveTabListenerRef: listenerRef,
+      getState: () => activeBrowserWorkspace({ environmentId: 'env-a', staged: true })
     })
 
-    fire()
+    requireListener(listenerRef)()
 
     expect(closeWebRuntimeSessionTab).not.toHaveBeenCalled()
     expect(closeBrowserTab).toHaveBeenCalledWith('workspace-1', { reason: 'cleanup' })
