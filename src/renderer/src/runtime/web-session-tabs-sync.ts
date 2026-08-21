@@ -1614,6 +1614,25 @@ function browserWorkspaceHasRemoteEnvironmentPage(
   )
 }
 
+/**
+ * The host publishes `title || url || 'Browser'` (see the runtime's browser tab projection), so a
+ * page that has not produced a real title yet arrives as its own url — or as the bare default.
+ * Neither says anything the local row does not already say better, so while the page still sits at
+ * the url this client gave it, the local title stands and only a real navigation replaces it.
+ */
+function resolveMirroredBrowserTitle(
+  tab: RuntimeMobileSessionBrowserTab,
+  existingPage: BrowserPage | undefined
+): string {
+  const published = tab.title.trim()
+  const publishedIsHostFallback =
+    published === '' || published === tab.url.trim() || published === 'Browser'
+  if (existingPage && publishedIsHostFallback && tab.url === existingPage.url) {
+    return existingPage.title
+  }
+  return published || 'Browser'
+}
+
 function buildMirroredBrowserTabs(
   snapshot: RuntimeMobileSessionTabsResult,
   environmentId: string,
@@ -1645,7 +1664,14 @@ function buildMirroredBrowserTabs(
     const hostGroupId = hostGroupIdByTabId.get(tab.id) ?? fallbackGroupId
     const existingClientGroupId =
       existing?.unifiedTab?.groupId !== hostGroupId ? existing?.unifiedTab?.groupId : undefined
-    const preferredClientGroupId = recordedClientGroupId ?? existingClientGroupId
+    // Why: a staged row was placed by this client, so wherever it sits now is the user's own
+    // choice — including a split made after the create recorded its intent. Rows the client never
+    // staged carry no such truth: a pre-response snapshot may have parked them in the host group,
+    // and there the record is what repairs them.
+    const preferredClientGroupId =
+      existing && state.remoteBrowserPageHandlesByPageId[existing.page.id]?.staged === true
+        ? (existing.unifiedTab?.groupId ?? recordedClientGroupId)
+        : (recordedClientGroupId ?? existingClientGroupId)
     const clientGroupId =
       preferredClientGroupId &&
       clientGroupIds.has(preferredClientGroupId) &&
@@ -1653,7 +1679,7 @@ function buildMirroredBrowserTabs(
         ? preferredClientGroupId
         : undefined
     const groupId = clientGroupId ?? hostGroupId
-    const title = tab.title.trim() || 'Browser'
+    const title = resolveMirroredBrowserTitle(tab, existing?.page)
     const nextPage: BrowserPage = {
       id: pageId,
       workspaceId,
@@ -2952,13 +2978,18 @@ function applyWebSessionTabsSnapshotWithContext(
     )
     // Why: a pending record is this client's own create intent — authoritative even when the
     // provisional tab was provisionally adopted elsewhere or the target group record lags its leaf.
+    // The entry's own clientGroupId comes first, so a group the user moved the row into after the
+    // create was recorded wins over the group the create asked for.
     const placementMoves = mirroredBrowserTabs.flatMap((entry) => {
       const recordedGroupId = peekWebSessionBrowserPlacementGroup({
         environmentId,
         worktreeId,
         remotePageId: entry.remotePageId
       })
-      return recordedGroupId ? [{ tabId: entry.unifiedTab.id, groupId: recordedGroupId }] : []
+      if (!recordedGroupId) {
+        return []
+      }
+      return [{ tabId: entry.unifiedTab.id, groupId: entry.clientGroupId ?? recordedGroupId }]
     })
     for (const parentTabId of new Set(terminalSurfaceTabs.map((tab) => tab.parentTabId))) {
       const recordedGroupId = peekWebSessionTerminalPlacementGroup({

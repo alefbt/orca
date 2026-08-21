@@ -78,6 +78,20 @@ export function isStagedWebRuntimeBrowserTabLive(
   )
 }
 
+/**
+ * Which group the staged tab is in right now. The create asked for one group, but the user may
+ * have moved the tab since; waiting for materialization in the group they left would stall the
+ * create for the whole wait and then log a bogus "landed outside the requested group".
+ */
+export function resolveStagedWebRuntimeBrowserTabGroupId(
+  staged: StagedWebRuntimeBrowserTab,
+  worktreeId: string
+): string | undefined {
+  return (useAppStore.getState().unifiedTabsByWorktree[worktreeId] ?? []).find(
+    (tab) => tab.contentType === 'browser' && tab.entityId === staged.workspaceId
+  )?.groupId
+}
+
 function findWorkspaceIdForRemotePage(args: {
   environmentId: string
   worktreeId: string

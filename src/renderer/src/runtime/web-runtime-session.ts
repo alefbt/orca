@@ -100,6 +100,7 @@ import {
   discardStagedWebRuntimeBrowserTab,
   isStagedWebRuntimeBrowserTabLive,
   rehomeStagedWebRuntimeBrowserTab,
+  resolveStagedWebRuntimeBrowserTabGroupId,
   stageWebRuntimeBrowserTab,
   StagedWebRuntimeBrowserTabCancelledError,
   type StagedWebRuntimeBrowserTab
@@ -624,26 +625,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         ? { focusAddressBar: args.stagedFocusAddressBar }
         : {})
     })
-    const placementPreference = args.placementPreference ?? 'auto'
-    let placement: BrowserPageCreationPlacement = { kind: 'server' }
-    if (placementPreference !== 'server' && hostAdvertisesClientHosting) {
-      try {
-        placement = await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
-          selector: environmentId,
-          expectedPairingRevision: intentOwner.pairingRevision,
-          preference: placementPreference
-        })
-      } catch (error) {
-        console.warn('[web-runtime-session] failed to prepare client browser host:', error)
-        throw new Error(
-          translate(
-            'browser.clientHosted.preparationFailed',
-            "Couldn't start the remote browser on this desktop. Check the paired connection and try again."
-          ),
-          { cause: error }
-        )
-      }
-    }
+    // Why: sample the focus expectation and arm its guard against the state staging just wrote,
+    // before any await. Sampling after the client-host preparation round-trip baked a switch made
+    // during it into the baseline, so the guard read the user's new tab as "hasn't moved" and
+    // adoption stole focus back.
     const initialFocusState = shouldFocusOnCreate ? useAppStore.getState() : null
     const expectedActiveWorktreeId = initialFocusState?.activeWorktreeId
     const expectedActiveWorkspaceExecutionHostId = initialFocusState?.activeWorkspaceExecutionHostId
@@ -685,6 +670,26 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         clearWebSessionFocusIntentIfMatches(intentOwner, args.worktreeId, guardedPageId)
         unsubscribeFocusGuard()
       })
+    }
+    const placementPreference = args.placementPreference ?? 'auto'
+    let placement: BrowserPageCreationPlacement = { kind: 'server' }
+    if (placementPreference !== 'server' && hostAdvertisesClientHosting) {
+      try {
+        placement = await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
+          selector: environmentId,
+          expectedPairingRevision: intentOwner.pairingRevision,
+          preference: placementPreference
+        })
+      } catch (error) {
+        console.warn('[web-runtime-session] failed to prepare client browser host:', error)
+        throw new Error(
+          translate(
+            'browser.clientHosted.preparationFailed',
+            "Couldn't start the remote browser on this desktop. Check the paired connection and try again."
+          ),
+          { cause: error }
+        )
+      }
     }
     createAttempted = true
     const navigateAfterCreate =
@@ -784,7 +789,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         throw error
       }
     }
-    const expectedGroupId = args.clientTargetGroupId ?? args.targetGroupId
+    const expectedGroupId =
+      (staged ? resolveStagedWebRuntimeBrowserTabGroupId(staged, args.worktreeId) : undefined) ??
+      args.clientTargetGroupId ??
+      args.targetGroupId
     let materialized = hasMaterializedWebRuntimeBrowserPage(
       useAppStore.getState(),
       environmentId,
