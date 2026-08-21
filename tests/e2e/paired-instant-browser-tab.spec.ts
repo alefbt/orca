@@ -1,4 +1,5 @@
 import { expect, test } from './helpers/orca-app'
+import { readHostBrowserPageIds } from './helpers/host-session-tabs'
 import {
   readPanes,
   requireGroup,
@@ -328,6 +329,121 @@ test('takes back the optimistic tab when the paired create fails to reconcile', 
     await client.page.evaluate(() =>
       (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
     )
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+// Why: an optimistic tab is clickable the instant it appears, so its X can land while the create
+// is still in flight. The staged page names a runtime the host has not minted it on yet, so the
+// close cannot go to the host — and if the create is allowed to finish anyway, its snapshot puts
+// the tab straight back and leaves a page open on the host that nothing in the client shows.
+test('cancels a held paired browser create when its staged tab is closed from the strip', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+    const before = requireGroup(await readPanes(client.page, worktreeId), rootGroupId)
+    await recordBrowserTabTransitions(fixture)
+
+    await client.page.evaluate(() => {
+      const fault = (window as FaultWindow).__webRuntimeBrowserCreationFault
+      if (!fault) {
+        throw new Error('Browser creation E2E fault seam unavailable')
+      }
+      fault.arm()
+    })
+    await client.page.evaluate(
+      ({ groupId, url }) => {
+        const state = window.__store?.getState()
+        if (!state) {
+          throw new Error('Paired client store unavailable')
+        }
+        state.setBrowserDefaultUrl(url)
+        const create = state.openNewBrowserTabInActiveWorkspace(groupId).catch(() => undefined)
+        ;(window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate = create
+      },
+      { groupId: rootGroupId, url: fixture.url }
+    )
+
+    const held = await waitForGroupTabCount(
+      client.page,
+      worktreeId,
+      rootGroupId,
+      before.tabOrder.length + 1,
+      'paired client never staged the optimistic browser tab'
+    )
+    const stagedTab = held.tabs.find(
+      (tab) => tab.id === requireGroup(held, rootGroupId).tabOrder.at(-1)
+    )
+    expect(stagedTab?.contentType).toBe('browser')
+    // The host really did mint a page, so an unhandled cancel would leave a real orphan.
+    await expect
+      .poll(
+        () =>
+          client.page.evaluate(
+            () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.snapshot() ?? null
+          ),
+        { timeout: 60_000, message: 'held browser create never reached the fault seam' }
+      )
+      .toMatchObject({ armed: true, createdPageId: expect.any(String) })
+
+    // The user's X, on the real tab strip, while the create is still held.
+    await client.page
+      .locator(
+        `[data-tab-group-strip-id="${rootGroupId}"] [data-tab-id="${stagedTab?.entityId}"] button`
+      )
+      .click()
+    const cancelled = await waitForGroupTabCount(
+      client.page,
+      worktreeId,
+      rootGroupId,
+      before.tabOrder.length,
+      'the strip X left the staged browser tab standing'
+    )
+    expect(cancelled.tabs.filter((tab) => tab.contentType === 'browser')).toEqual([])
+
+    expect(
+      await client.page.evaluate(
+        () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.release() ?? false
+      )
+    ).toBe(true)
+    await client.page.evaluate(
+      () => (window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate
+    )
+    // Why: an armed fault suppresses host snapshots, and a resurrection can only arrive on one.
+    // Disarm before the no-resurrection assertions or they pass for the wrong reason.
+    await client.page.evaluate(() =>
+      (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
+    )
+
+    // Why: the host's own tab list is the only proof the page was retired — the client removing
+    // its rows is exactly what an orphaned host page looks like from inside the client.
+    await expect
+      .poll(() => readHostBrowserPageIds(fixture.host.client, testRepoPath), {
+        timeout: 60_000,
+        message: 'host kept the page from the cancelled create'
+      })
+      .toEqual([])
+    // Why: give the now-unsuppressed snapshots a window to put the tab back before declaring it
+    // gone — the failure this guards is a late re-add, not an immediate one.
+    await client.page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 3_000)))
+    const settled = await readPanes(client.page, worktreeId)
+    expect(requireGroup(settled, rootGroupId).tabOrder).toEqual(before.tabOrder)
+    expect(settled.activeGroupId).toBe(rootGroupId)
+    expect(
+      await client.page.evaluate(
+        (id) => (window.__store?.getState().browserTabsByWorktree[id] ?? []).length,
+        worktreeId
+      )
+    ).toBe(0)
+    // Why: the transition log catches a resurrection that a final-state read would miss if the
+    // snapshot re-added the tab and the reconciler then removed it again.
+    const transitions = await readBrowserTabTransitions(fixture)
+    expect(transitions.at(-1)).toBe('')
+    expect(transitions.filter((entry) => entry !== '')).toHaveLength(1)
   } finally {
     await fixture.dispose()
   }

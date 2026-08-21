@@ -2,8 +2,8 @@ import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Page, TestInfo } from '@stablyai/playwright-test'
 import { RuntimeClient } from '../../src/cli/runtime/client'
-import type { RuntimeMobileSessionTabsResult } from '../../src/shared/runtime-types'
 import { expect, test } from './helpers/orca-app'
+import { readHostTabs } from './helpers/host-session-tabs'
 import { openFileExplorer } from './helpers/file-explorer'
 import {
   launchHeadlessPairedRuntimeHost,
@@ -42,16 +42,6 @@ type ClientTabState = {
   editorTabIds: string[]
   groupIds: string[]
   terminalTabIds: string[]
-}
-
-async function readHostTabs(
-  hostClient: RuntimeClient,
-  repoPath: string
-): Promise<RuntimeMobileSessionTabsResult> {
-  const response = await hostClient.call<RuntimeMobileSessionTabsResult>('session.tabs.list', {
-    worktree: `path:${repoPath}`
-  })
-  return response.result
 }
 
 async function readClientTabs(page: Page, worktreeId: string): Promise<ClientTabState> {

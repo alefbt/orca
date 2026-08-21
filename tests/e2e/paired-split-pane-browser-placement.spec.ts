@@ -1,4 +1,5 @@
 import { expect, test } from './helpers/orca-app'
+import { readHostBrowserPageIds } from './helpers/host-session-tabs'
 import {
   contentTypesOf,
   openRemoteBrowserTab,
@@ -152,26 +153,11 @@ test('collapses the split pane when its last paired browser tab is closed from t
     )
     expect(browserTab?.contentType).toBe('browser')
 
-    // Why: a local-only close would collapse on its own, so pin the branch the strip's X really
-    // takes here — otherwise this test silently degrades into covering the local path.
-    const closeRoute = await client.page.evaluate((entityId) => {
-      const state = window.__store?.getState()
-      const pages = state?.browserPagesByWorkspace[entityId] ?? []
-      return {
-        hasLocalPages: pages.length > 0,
-        remoteOwners: [
-          ...new Set(
-            pages.flatMap((page) => {
-              const environmentId =
-                state?.remoteBrowserPageHandlesByPageId[page.id]?.environmentId?.trim() ||
-                page.browserRuntimeEnvironmentId?.trim()
-              return environmentId ? [environmentId] : []
-            })
-          )
-        ]
-      }
-    }, browserTab?.entityId ?? '')
-    expect(closeRoute).toEqual({ hasLocalPages: true, remoteOwners: [client.environmentId] })
+    // Why: a local-only close would collapse the pane on its own, so this test only guards the
+    // remote-owned route while the host really holds the page. Ask the host — a client-side redo
+    // of the ownership rule stops guarding the moment that rule changes.
+    const hostPagesBefore = await readHostBrowserPageIds(fixture.host.client, testRepoPath)
+    expect(hostPagesBefore).toHaveLength(1)
 
     await client.page
       .locator(
@@ -204,6 +190,14 @@ test('collapses the split pane when its last paired browser tab is closed from t
     }
     const collapsed = await readPanes(client.page, worktreeId)
     expect(collapsed.activeGroupId).toBe(rootGroupId)
+    // Why: the pane collapsing proves the client removed its mirror; only the host's own tab list
+    // proves the close actually reached the runtime that owned the page.
+    await expect
+      .poll(() => readHostBrowserPageIds(fixture.host.client, testRepoPath), {
+        timeout: 30_000,
+        message: 'host kept the browser page after the tab-strip close'
+      })
+      .toEqual([])
   } finally {
     await fixture.dispose()
   }
