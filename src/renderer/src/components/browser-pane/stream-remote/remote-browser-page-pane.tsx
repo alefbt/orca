@@ -4,13 +4,19 @@ import { BROWSER_CERTIFICATE_TRUST_RUNTIME_CAPABILITY } from '../../../../../sha
 import type { BrowserPage as BrowserPageState } from '../../../../../shared/browser-workspace-types'
 import { runtimeEnvironmentSupportsCapability } from '@/runtime/runtime-rpc-client'
 import { openWorkspaceBrowserTab } from '@/lib/workspace-browser-tab-open'
+import { useBrowserPageChromeFocus } from '../assemble-chrome/use-browser-page-chrome-focus'
+import { useElementGuestFocus } from '../assemble-chrome/browser-page-guest-focus'
 import { useMarkupMode, type MarkupCaptureContext } from '../annotate/useMarkupMode'
 import { deliverMarkupToClipboard } from '../annotate/markup-clipboard-delivery'
 import {
   isRemoteBrowserStreamBusy,
   remoteBrowserStreamNotice
 } from './remote-browser-stream-status'
-import type { BrowserTabPageState, BrowserPageUrlSetter } from '../describe-page/browser-page-types'
+import type {
+  BrowserChromeShortcutScope,
+  BrowserPageUrlSetter,
+  BrowserTabPageState
+} from '../describe-page/browser-page-types'
 import type { RemoteBrowserPaneNotice } from './remote-browser-page-input-model'
 import { useRemoteBrowserPageLifecycle } from './use-remote-browser-page-lifecycle'
 import { useRemoteBrowserPageStream } from './use-remote-browser-page-stream'
@@ -29,16 +35,20 @@ import { RemoteBrowserPageViewport } from './remote-browser-page-viewport'
 
 export function RemoteBrowserPagePane({
   browserTab,
+  workspaceId,
   runtimeEnvironmentId,
   worktreeId,
   isActive,
+  chromeShortcutScope,
   onUpdatePageState,
   onSetUrl
 }: {
   browserTab: BrowserPageState
+  workspaceId: string
   runtimeEnvironmentId: string
   worktreeId: string
   isActive: boolean
+  chromeShortcutScope: BrowserChromeShortcutScope
   onUpdatePageState: (tabId: string, updates: BrowserTabPageState) => void
   onSetUrl: BrowserPageUrlSetter
 }): React.JSX.Element {
@@ -46,6 +56,9 @@ export function RemoteBrowserPagePane({
   const addressBarInputRef = useRef<HTMLInputElement | null>(null)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const remoteViewportRef = useRef<HTMLDivElement | null>(null)
+  // Why: the screencast <img> only exists once a frame lands, so before the first one the
+  // viewport is the only place guest focus can go.
+  const guestFocus = useElementGuestFocus(imageRef, remoteViewportRef)
   // Pane-owned notices, split by what they are ABOUT, because that decides who outranks whom:
   //
   //   'direct'      — feedback on what the user just did (URL validation). Always shown: it is the
@@ -156,8 +169,6 @@ export function RemoteBrowserPagePane({
     browserTab,
     isActive,
     addressBarInputRef,
-    imageRef,
-    remoteViewportRef,
     lifecycle,
     runtimeWorktree,
     runtimeTarget,
@@ -169,6 +180,25 @@ export function RemoteBrowserPagePane({
     setPaneNotice,
     setPaneBusy
   })
+
+  useBrowserPageChromeFocus({
+    browserTabId: browserTab.id,
+    workspaceId,
+    isActive,
+    chromeShortcutScope,
+    addressBarInputRef,
+    guestFocus
+  })
+
+  // Why: focus given to the pane before the first frame can only land on the viewport, but the
+  // screencast <img> is what carries key input — hand it over as soon as there is one.
+  const hasStreamFrame = frameUrl !== null
+  useEffect(() => {
+    if (!hasStreamFrame || document.activeElement !== remoteViewportRef.current) {
+      return
+    }
+    imageRef.current?.focus()
+  }, [hasStreamFrame])
 
   const { reconnectRemoteStream } = useRemoteBrowserPageStream({
     activeRuntimeEnvironmentId,

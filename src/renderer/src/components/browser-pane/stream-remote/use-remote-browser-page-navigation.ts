@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
 import { redactKagiSessionToken } from '../../../../../shared/browser-url'
+import { normalizeBrowserHistoryUrl } from '../../../../../shared/workspace-session-browser-history'
 import { resolveBrowserAddressBarSubmission } from '../navigate/browser-address-bar-navigation'
 import { keybindingMatchesAction } from '../../../../../shared/keybindings'
 import type {
@@ -15,11 +16,6 @@ import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { isRemoteBrowserPageMissingError } from './remote-browser-stream-errors'
 import type { RemoteBrowserOperationToken } from './remote-browser-stream-tokens'
 import type { RemoteBrowserStreamLifecycle } from './remote-browser-stream-lifecycle'
-import {
-  consumeBrowserFocusRequest,
-  ORCA_BROWSER_FOCUS_REQUEST_EVENT,
-  type BrowserFocusRequestDetail
-} from '../host-guest/browser-focus'
 import type { BrowserPageUrlSetter, BrowserTabPageState } from '../describe-page/browser-page-types'
 import { getBrowserDisplayTitle, toDisplayUrl } from '../describe-page/browser-page-url-display'
 import type {
@@ -31,8 +27,6 @@ export function useRemoteBrowserPageNavigation({
   browserTab,
   isActive,
   addressBarInputRef,
-  imageRef,
-  remoteViewportRef,
   lifecycle,
   runtimeWorktree,
   runtimeTarget,
@@ -47,8 +41,6 @@ export function useRemoteBrowserPageNavigation({
   browserTab: BrowserPageState
   isActive: boolean
   addressBarInputRef: React.RefObject<HTMLInputElement | null>
-  imageRef: React.RefObject<HTMLImageElement | null>
-  remoteViewportRef: React.RefObject<HTMLDivElement | null>
   lifecycle: RemoteBrowserStreamLifecycle
   runtimeWorktree: string
   runtimeTarget: () => RemoteBrowserRuntimeTarget | null
@@ -73,6 +65,8 @@ export function useRemoteBrowserPageNavigation({
 } {
   const [addressBarValue, setAddressBarValue] = useState(toDisplayUrl(browserTab.url))
   const keybindings = useAppStore((state) => state.keybindings)
+  const addBrowserHistoryEntry = useAppStore((state) => state.addBrowserHistoryEntry)
+  const lastFiledHistoryRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (document.activeElement === addressBarInputRef.current) {
@@ -84,17 +78,27 @@ export function useRemoteBrowserPageNavigation({
   const applyRemoteTabInfo = useCallback(
     (tab: Pick<BrowserTabInfo, 'url' | 'title'>): void => {
       const safeUrl = redactKagiSessionToken(tab.url || 'about:blank')
+      const title = getBrowserDisplayTitle(tab.title, safeUrl)
       onSetUrl(browserTab.id, safeUrl)
       onUpdatePageState(browserTab.id, {
-        title: getBrowserDisplayTitle(tab.title, safeUrl),
+        title,
         loading: false,
         loadError: null
       })
+      // Why: the address bar's suggestions read the client's shared URL history, so pages this
+      // client drove on the runtime have to file their navigations there like a local guest does.
+      // Only on a change, though: settled scrolls, clicks and keystrokes all re-read tab info,
+      // and filing each one rewrites the store — re-rendering every address bar in the app.
+      const filing = `${normalizeBrowserHistoryUrl(safeUrl)}\n${title}`
+      if (filing !== lastFiledHistoryRef.current) {
+        lastFiledHistoryRef.current = filing
+        addBrowserHistoryEntry(safeUrl, title)
+      }
       if (document.activeElement !== addressBarInputRef.current) {
         setAddressBarValue(toDisplayUrl(safeUrl))
       }
     },
-    [addressBarInputRef, browserTab.id, onSetUrl, onUpdatePageState]
+    [addBrowserHistoryEntry, addressBarInputRef, browserTab.id, onSetUrl, onUpdatePageState]
   )
 
   const scheduleRemoteTabInfoRefresh = useCallback(
@@ -103,42 +107,6 @@ export function useRemoteBrowserPageNavigation({
     },
     [lifecycle]
   )
-
-  useEffect(() => {
-    if (!isActive) {
-      return
-    }
-    return window.api.ui.onFocusBrowserAddressBar(() => {
-      addressBarInputRef.current?.focus()
-      addressBarInputRef.current?.select()
-    })
-  }, [addressBarInputRef, isActive])
-
-  useEffect(() => {
-    if (!isActive) {
-      return
-    }
-    const handleBrowserFocusRequest = (event: Event): void => {
-      const detail = (event as CustomEvent<BrowserFocusRequestDetail>).detail
-      if (!detail || detail.pageId !== browserTab.id) {
-        return
-      }
-      const focusTarget = consumeBrowserFocusRequest(browserTab.id)
-      if (!focusTarget) {
-        return
-      }
-      if (focusTarget === 'address-bar') {
-        addressBarInputRef.current?.focus()
-        addressBarInputRef.current?.select()
-        return
-      }
-      const target = imageRef.current ?? remoteViewportRef.current
-      target?.focus()
-    }
-    window.addEventListener(ORCA_BROWSER_FOCUS_REQUEST_EVENT, handleBrowserFocusRequest)
-    return () =>
-      window.removeEventListener(ORCA_BROWSER_FOCUS_REQUEST_EVENT, handleBrowserFocusRequest)
-  }, [addressBarInputRef, browserTab.id, imageRef, isActive, remoteViewportRef])
 
   const runRemoteNavigation = useCallback(
     async (

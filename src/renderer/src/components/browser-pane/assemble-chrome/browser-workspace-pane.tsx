@@ -13,7 +13,7 @@ import {
 } from '@/lib/pane-manager/browser-mobile-driver-state'
 import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
 import { getBrowserPageRuntimeEnvironmentId } from '../describe-page/browser-page-url-display'
-import type { BrowserFindShortcutScope } from '../describe-page/browser-page-types'
+import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-types'
 import { RemoteBrowserPagePane } from '../stream-remote/remote-browser-page-pane'
 import { ClientHostedBrowserPagePane } from '../ClientHostedBrowserPagePane'
 import { BrowserPagePane } from './browser-page-pane'
@@ -22,13 +22,13 @@ import { SshRoutedBrowserPageGate } from './ssh-routed-browser-page-gate'
 export default function BrowserPane({
   browserTab,
   isActive,
-  findShortcutScope
+  chromeShortcutScope
 }: {
   browserTab: BrowserWorkspaceState
   isActive: boolean
-  findShortcutScope?: BrowserFindShortcutScope
+  chromeShortcutScope?: BrowserChromeShortcutScope
 }): React.JSX.Element {
-  const resolvedFindShortcutScope = findShortcutScope ?? (isActive ? 'focused' : 'inactive')
+  const resolvedChromeShortcutScope = chromeShortcutScope ?? (isActive ? 'focused' : 'inactive')
   const activeRuntimeEnvironmentId = useAppStore((s) =>
     getRuntimeEnvironmentIdForWorktree(s, browserTab.worktreeId)
   )
@@ -106,10 +106,12 @@ export default function BrowserPane({
         <ClientHostedBrowserPagePane
           key={`${clientPlacement.browserHostClientId}:${activeBrowserPage.id}:${clientPlacement.pageHostGeneration}`}
           browserTab={activeBrowserPage}
+          workspaceId={browserTab.id}
           runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}
           worktreeId={browserTab.worktreeId}
           placement={clientPlacement}
           isActive={isActive}
+          chromeShortcutScope={resolvedChromeShortcutScope}
           onUpdatePageState={updateBrowserPageState}
           onSetUrl={setBrowserPageUrl}
         />
@@ -117,9 +119,11 @@ export default function BrowserPane({
         <RemoteBrowserPagePane
           key={`${activeBrowserRuntimeEnvironmentId ?? ''}:${activeBrowserPage.id}`}
           browserTab={activeBrowserPage}
+          workspaceId={browserTab.id}
           runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}
           worktreeId={browserTab.worktreeId}
           isActive={isActive}
+          chromeShortcutScope={resolvedChromeShortcutScope}
           onUpdatePageState={updateBrowserPageState}
           onSetUrl={setBrowserPageUrl}
         />
@@ -148,8 +152,8 @@ export default function BrowserPane({
                   sessionProfileId={browserTab.sessionProfileId ?? null}
                   sessionPartition={routedPartition ?? browserTab.sessionPartition ?? null}
                   isActive={isActive && page.id === activeBrowserPage?.id}
-                  findShortcutScope={
-                    page.id === activeBrowserPage?.id ? resolvedFindShortcutScope : 'inactive'
+                  chromeShortcutScope={
+                    page.id === activeBrowserPage?.id ? resolvedChromeShortcutScope : 'inactive'
                   }
                   isAutomationVisible={automationVisiblePageIds.has(page.id)}
                   isMobileDriven={mobileDrivenPageIds.has(page.id)}
