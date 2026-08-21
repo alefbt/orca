@@ -33,6 +33,7 @@ const PAGE_ID = 'staged-page'
 const WORKSPACE_ID = 'staged-workspace'
 const UNIFIED_TAB_ID = 'staged-unified-tab'
 const SIBLING_TAB_ID = 'sibling-unified-tab'
+const OTHER_SIBLING_TAB_ID = 'other-sibling-unified-tab'
 
 function stagedWorkspace(title: string, url: string): BrowserWorkspace {
   return {
@@ -83,6 +84,16 @@ function stagedUnifiedTab(groupId: string, title: string): Tab {
     createdAt: NOW,
     isPreview: false,
     isPinned: false
+  }
+}
+
+/** A terminal row that keeps the split group non-empty and gives the user somewhere else to be. */
+function otherSiblingTerminalTab(): Tab {
+  return {
+    ...siblingTerminalTab(),
+    id: OTHER_SIBLING_TAB_ID,
+    entityId: OTHER_SIBLING_TAB_ID,
+    groupId: SPLIT_GROUP
   }
 }
 
@@ -242,12 +253,15 @@ describe('staged browser rows stay authoritative through adoption', () => {
     expect(layoutHasGroup(second.layoutByWorktree[WT], SPLIT_GROUP)).toBe(true)
   })
 
+  // Why the user is sitting in the OTHER group: this is the one case the record has to serve on
+  // its own, and a tab with no group of its own falls back to where the user is. Running it with
+  // the record's group active proves nothing — both answers agree.
   it('still honours the create record for a row the client never placed', () => {
     recordCreatePlacement()
-    // No local row at all: the host mirrored the page under its own ids, so the record is the
-    // only truth about where this client wanted it.
+    // No local row at all: staging can refuse (the create records its intent before it stages), and
+    // then the host mirrors the page under its own ids with nothing local to inherit a group from.
     const state = makeState({
-      activeGroupIdByWorktree: { [WT]: CREATE_GROUP },
+      activeGroupIdByWorktree: { [WT]: SPLIT_GROUP },
       groupsByWorktree: {
         [WT]: [
           {
@@ -256,7 +270,12 @@ describe('staged browser rows stay authoritative through adoption', () => {
             activeTabId: SIBLING_TAB_ID,
             tabOrder: [SIBLING_TAB_ID]
           },
-          { id: SPLIT_GROUP, worktreeId: WT, activeTabId: null, tabOrder: [] }
+          {
+            id: SPLIT_GROUP,
+            worktreeId: WT,
+            activeTabId: OTHER_SIBLING_TAB_ID,
+            tabOrder: [OTHER_SIBLING_TAB_ID]
+          }
         ]
       },
       layoutByWorktree: {
@@ -267,7 +286,7 @@ describe('staged browser rows stay authoritative through adoption', () => {
           second: { type: 'leaf', groupId: SPLIT_GROUP }
         }
       },
-      unifiedTabsByWorktree: { [WT]: [siblingTerminalTab()] }
+      unifiedTabsByWorktree: { [WT]: [siblingTerminalTab(), otherSiblingTerminalTab()] }
     })
 
     const next = applyPatch(state, makeSnapshot([hostTab('Example', 'https://example.com/')]))
