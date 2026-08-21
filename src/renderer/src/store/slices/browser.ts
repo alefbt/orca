@@ -954,7 +954,10 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         (entry) => entry.contentType === 'browser' && entry.entityId === tabId
       )
       if (workspaceItem) {
-        get().closeUnifiedTab(workspaceItem.id, isCleanup ? { recordInteraction: false } : undefined)
+        get().closeUnifiedTab(
+          workspaceItem.id,
+          isCleanup ? { preserveWorktreeSelection: true, recordInteraction: false } : undefined
+        )
       }
     }
   },

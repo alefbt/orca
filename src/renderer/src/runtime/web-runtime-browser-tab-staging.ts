@@ -103,11 +103,6 @@ export function rehomeStagedWebRuntimeBrowserTab(
   return staged
 }
 
-/** True once the host snapshot has replaced the optimistic handle with a published one. */
-export function isStagedWebRuntimeBrowserTabAdopted(staged: StagedWebRuntimeBrowserTab): boolean {
-  return useAppStore.getState().remoteBrowserPageHandlesByPageId[staged.pageId]?.staged !== true
-}
-
 /**
  * Remove a staged tab that never materialized. Adopted tabs are left alone — by then the rows
  * belong to the host snapshot, and the caller's own tabClose owns retiring the host page.

@@ -115,23 +115,27 @@ export function buildWorkspaceSessionPatch(
       )
     )
   }
-  if (changed.has('browserTabsByWorktree')) {
+  // Why: withoutStagedBrowserTabs hides rows based on the handle map, so clearing a staged flag
+  // changes which browser and tab rows persist even when the rows themselves are untouched.
+  const stagedVisibilityChanged = changed.has('remoteBrowserPageHandlesByPageId')
+  if (stagedVisibilityChanged || changed.has('browserTabsByWorktree')) {
     patch.browserTabsByWorktree = buildPersistedBrowserTabsByWorktree(
       snapshot.browserTabsByWorktree
     )
   }
-  if (changed.has('browserPagesByWorkspace')) {
+  if (stagedVisibilityChanged || changed.has('browserPagesByWorkspace')) {
     patch.browserPagesByWorkspace = buildPersistedBrowserPagesByWorkspace(
       snapshot.browserPagesByWorkspace
     )
   }
-  if (changed.has('activeBrowserTabIdByWorktree')) {
+  if (stagedVisibilityChanged || changed.has('activeBrowserTabIdByWorktree')) {
     patch.activeBrowserTabIdByWorktree = snapshot.activeBrowserTabIdByWorktree
   }
   if (changed.has('browserUrlHistory')) {
     patch.browserUrlHistory = normalizeBrowserHistoryEntries(snapshot.browserUrlHistory)
   }
   if (
+    stagedVisibilityChanged ||
     hasAnyChangedField(changed, [
       'activeGroupIdByWorktree',
       'groupsByWorktree',
