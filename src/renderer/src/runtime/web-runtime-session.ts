@@ -21,13 +21,12 @@ import type {
 } from '../../../shared/agent-session-resume'
 import {
   AGENT_SESSION_OMP_RESUME_PATH_RUNTIME_CAPABILITY,
-  BROWSER_CLIENT_AUTOMATION_RUNTIME_CAPABILITY,
-  BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
-  BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
   BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
 } from '../../../shared/protocol-version'
+import {
+  expectsBrowserClientHosting,
+  runtimeAdvertisesBrowserClientHosting
+} from '../../../shared/browser-client-hosting-eligibility'
 import type {
   BrowserClientHostPlacementPreference,
   BrowserPageCreationPlacement
@@ -582,22 +581,17 @@ export async function createWebRuntimeSessionBrowserTab(args: {
   const hostSupportsKnownPageId = advertisedCapabilities.includes(
     BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
   )
-  const hostAdvertisesClientHosting = [
-    BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
-    BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY,
-    BROWSER_CLIENT_AUTOMATION_RUNTIME_CAPABILITY,
-    BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
-    BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY
-  ].every((capability) => advertisedCapabilities.includes(capability))
-  // Why: mirrors prepareBrowserClientHostPlacement's own decision from the inputs this client
-  // already has, so the staged pane mounts as the kind of pane the create will produce. Only a
-  // cached status that disagrees with the live one costs the swap this avoids.
-  const expectsClientHosting =
-    (args.placementPreference ?? 'auto') !== 'server' &&
-    hostAdvertisesClientHosting &&
-    useAppStore.getState().settings?.browserClientHostedRemoteEnabled !== false &&
-    useAppStore.getState().runtimeStatusByEnvironmentId?.get(environmentId)?.status?.deviceScope !==
-      'mobile'
+  const hostAdvertisesClientHosting = runtimeAdvertisesBrowserClientHosting(advertisedCapabilities)
+  // Why the same predicate the main process uses: this mounts the staged pane one round-trip
+  // before prepareBrowserClientHostPlacement answers, so the two have to reach the same verdict
+  // from the same inputs. Only a cached status disagreeing with the live one costs the swap.
+  const expectsClientHosting = expectsBrowserClientHosting({
+    enabled: useAppStore.getState().settings?.browserClientHostedRemoteEnabled !== false,
+    preference: args.placementPreference,
+    deviceScope: useAppStore.getState().runtimeStatusByEnvironmentId?.get(environmentId)?.status
+      ?.deviceScope,
+    capabilities: advertisedCapabilities
+  })
   let unsubscribeFocusGuard = (): void => {}
   let guardedPageId = provisionalPageId
   let createdPageId: string | null = null

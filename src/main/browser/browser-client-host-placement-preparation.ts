@@ -3,25 +3,12 @@ import type {
   BrowserClientHostPlacementPreference,
   BrowserPageCreationPlacement
 } from '../../shared/browser-client-host-placement'
-import {
-  BROWSER_CLIENT_AUTOMATION_RUNTIME_CAPABILITY,
-  BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
-  BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY
-} from '../../shared/protocol-version'
+import { expectsBrowserClientHosting } from '../../shared/browser-client-hosting-eligibility'
 import type { KnownRuntimeEnvironment } from '../../shared/runtime-environments'
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import type { RuntimeStatus } from '../../shared/runtime-types'
 
 const SERVER_PLACEMENT = Object.freeze({ kind: 'server' as const })
-const REQUIRED_RUNTIME_CAPABILITIES = [
-  BROWSER_CLIENT_HOST_RUNTIME_CAPABILITY,
-  BROWSER_CLIENT_PAGE_METADATA_RUNTIME_CAPABILITY,
-  BROWSER_CLIENT_AUTOMATION_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
-  BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY
-] as const
 
 type BrowserClientHostPlacementPreparationOptions = {
   selector: string
@@ -40,6 +27,9 @@ type BrowserClientHostPlacementPreparationOptions = {
 export async function prepareBrowserClientHostPlacement(
   options: BrowserClientHostPlacementPreparationOptions
 ): Promise<BrowserPageCreationPlacement> {
+  // Why a partial check here: everything below costs a status round-trip, and these two inputs are
+  // already known. The authoritative decision is made once the status arrives, so a drift in this
+  // shortcut costs a wasted round-trip rather than a wrong placement.
   if (!options.enabled || options.preference === 'server') {
     return SERVER_PLACEMENT
   }
@@ -56,7 +46,14 @@ export async function prepareBrowserClientHostPlacement(
   }
   const environment = options.resolveEnvironment(initialEnvironment.id)
   requireCurrentPairing(environment, pairingRevision)
-  if (status.deviceScope === 'mobile' || !supportsBrowserClientHosting(status.capabilities)) {
+  if (
+    !expectsBrowserClientHosting({
+      enabled: options.enabled,
+      preference: options.preference,
+      deviceScope: status.deviceScope,
+      capabilities: status.capabilities
+    })
+  ) {
     return SERVER_PLACEMENT
   }
   if (status.graphStatus !== 'ready') {
@@ -82,10 +79,6 @@ export async function prepareBrowserClientHostPlacement(
     kind: 'client',
     browserHostClientId: authority.browserHostClientId
   })
-}
-
-function supportsBrowserClientHosting(capabilities: RuntimeStatus['capabilities']): boolean {
-  return REQUIRED_RUNTIME_CAPABILITIES.every((capability) => capabilities?.includes(capability))
 }
 
 function requireCurrentPairing(

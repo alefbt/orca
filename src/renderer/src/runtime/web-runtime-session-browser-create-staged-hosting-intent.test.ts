@@ -165,6 +165,22 @@ describe('staged client-hosting intent', () => {
     expect(await stageHandleFor()).toMatchObject({ staged: true, stagedClientHosted: true })
   })
 
+  // Why: without browser.tab-create-known-id.v1 the create rehomes onto the host's page id, which
+  // rewrites the handle. A rewrite that forgets the mark drops the pane back to streamed mid-create.
+  it('keeps the client-hosted mark when the create rehomes onto a host-minted id', async () => {
+    await stageHandleFor({
+      capabilities: CLIENT_HOSTING_CAPABILITIES.filter(
+        (capability) => capability !== BROWSER_TAB_CREATE_KNOWN_ID_RUNTIME_CAPABILITY
+      )
+    })
+
+    expect(mocks.setRemoteBrowserPageHandle.mock.calls.at(-1)?.[1]).toMatchObject({
+      remotePageId: 'remote-browser-page-1',
+      staged: true,
+      stagedClientHosted: true
+    })
+  })
+
   it.each([
     {
       name: 'the caller asked for a server page',
