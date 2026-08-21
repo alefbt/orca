@@ -405,18 +405,16 @@ test('cancels a held paired browser create when its staged tab is closed from th
     )
     expect(cancelled.tabs.filter((tab) => tab.contentType === 'browser')).toEqual([])
 
-    expect(
-      await client.page.evaluate(
-        () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.release() ?? false
-      )
-    ).toBe(true)
-    await client.page.evaluate(
-      () => (window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate
-    )
-    // Why: an armed fault suppresses host snapshots, and a resurrection can only arrive on one.
-    // Disarm before the no-resurrection assertions or they pass for the wrong reason.
+    // Why reset and not release: release also arms a reconciliation failure, and that failure
+    // cleans the host page up on its own — which would let this test pass with the cancel handling
+    // removed. reset lifts the hold and the snapshot suppression together, so the create carries on
+    // to a genuine success and the host snapshot is free to re-add the tab the user just closed.
+    // That is the scenario, and it is the one that has to end with no tab and no host page.
     await client.page.evaluate(() =>
       (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
+    )
+    await client.page.evaluate(
+      () => (window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate
     )
 
     // Why: the host's own tab list is the only proof the page was retired — the client removing

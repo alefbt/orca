@@ -730,8 +730,8 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     // Why: the strip's X on a staged tab only unwinds this client's rows — it cannot close a host
     // page whose id did not exist when the user clicked. Hand the cancel to the cleanup path in the
     // catch below, which already owns retiring an unreconciled host page.
-    // Why (accepted bound): this is the earliest the host page can be named, so a cancel during the
-    // create round-trip leaves that page alive for up to the RPC timeout. That is the same bound the
+    // Why (accepted bound): the host page has no name until the create answers, so a cancel during
+    // that round-trip leaves it alive for up to the RPC timeout. That is the same bound the
     // unreconciled-cleanup path has always accepted, so no sweep is added for it.
     if (staged && !isStagedWebRuntimeBrowserTabLive(staged, args.worktreeId)) {
       throw new StagedWebRuntimeBrowserTabCancelledError()

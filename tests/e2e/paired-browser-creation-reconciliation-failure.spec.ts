@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { Page, TestInfo } from '@stablyai/playwright-test'
 import { RuntimeClient } from '../../src/cli/runtime/client'
 import { expect, test } from './helpers/orca-app'
-import { readHostTabs } from './helpers/host-session-tabs'
+import { readHostBrowserPageIds, readHostTabs } from './helpers/host-session-tabs'
 import { openFileExplorer } from './helpers/file-explorer'
 import {
   launchHeadlessPairedRuntimeHost,
@@ -124,10 +124,7 @@ async function runReconciliationFailureJourney(args: {
     const baselineClient = await readClientTabs(page, worktreeId)
     expect(baselineClient.editorTabIds).not.toHaveLength(0)
     expect(baselineClient.terminalTabIds).not.toHaveLength(0)
-    const baselineHost = await readHostTabs(args.hostClient, args.repoPath)
-    const baselineHostBrowserIds = baselineHost.tabs
-      .filter((tab) => tab.type === 'browser')
-      .map((tab) => tab.browserPageId)
+    const baselineHostBrowserIds = await readHostBrowserPageIds(args.hostClient, args.repoPath)
 
     await page.evaluate(() => {
       const fault = (window as FaultWindow).__webRuntimeBrowserCreationFault
@@ -157,10 +154,7 @@ async function runReconciliationFailureJourney(args: {
       throw new Error('Held browser creation did not expose its exact host page id')
     }
 
-    const heldHost = await readHostTabs(args.hostClient, args.repoPath)
-    expect(
-      heldHost.tabs.some((tab) => tab.type === 'browser' && tab.browserPageId === createdPageId)
-    ).toBe(true)
+    expect(await readHostBrowserPageIds(args.hostClient, args.repoPath)).toContain(createdPageId)
     // Why: the tab is staged on click, so while the create is held the user already sees it —
     // exactly one of it, in the new split. The rollback assertions after release are what prove
     // the optimism is unwound rather than stranded.
@@ -191,16 +185,11 @@ async function runReconciliationFailureJourney(args: {
       timeout: 30_000
     })
     await expect
-      .poll(
-        async () => {
-          const snapshot = await readHostTabs(args.hostClient, args.repoPath)
-          return snapshot.tabs.some(
-            (tab) => tab.type === 'browser' && tab.browserPageId === createdPageId
-          )
-        },
-        { timeout: 30_000, message: 'rollback did not close the exact host browser page' }
-      )
-      .toBe(false)
+      .poll(() => readHostBrowserPageIds(args.hostClient, args.repoPath), {
+        timeout: 30_000,
+        message: 'rollback did not close the exact host browser page'
+      })
+      .not.toContain(createdPageId)
     const settledClient = await expect
       .poll(() => readClientTabs(page, worktreeId), {
         timeout: 30_000,
@@ -215,11 +204,9 @@ async function runReconciliationFailureJourney(args: {
       })
       .then(() => readClientTabs(page, worktreeId))
     expect(settledClient).toEqual(baselineClient)
-    expect(
-      (await readHostTabs(args.hostClient, args.repoPath)).tabs
-        .filter((tab) => tab.type === 'browser')
-        .map((tab) => tab.browserPageId)
-    ).toEqual(baselineHostBrowserIds)
+    expect(await readHostBrowserPageIds(args.hostClient, args.repoPath)).toEqual(
+      baselineHostBrowserIds
+    )
     await page.evaluate(() => (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset())
   } finally {
     await client?.dispose()

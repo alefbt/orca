@@ -16,14 +16,20 @@ export async function readHostTabs(
   return response.result
 }
 
-/** Ids of the browser tabs the host currently publishes for the worktree. */
+/**
+ * The browser pages the host itself still holds for a worktree.
+ *
+ * Why not readHostTabs: a headless paired host does not project browser pages into
+ * session.tabs.list — that snapshot carries only terminals — so asking it whether a page survived
+ * a close answers "no" whether or not the close ever reached the host. browser.tabList reads the
+ * host's own page registry, which is the thing a close has to empty.
+ */
 export async function readHostBrowserPageIds(
   hostClient: RuntimeClient,
   repoPath: string
 ): Promise<string[]> {
-  const snapshot = await readHostTabs(hostClient, repoPath)
-  return snapshot.tabs
-    .filter((tab) => tab.type === 'browser')
-    .map((tab) => tab.browserPageId ?? tab.id)
-    .sort()
+  const response = await hostClient.call<{ tabs: { browserPageId: string }[] }>('browser.tabList', {
+    worktree: `path:${repoPath}`
+  })
+  return response.result.tabs.map((tab) => tab.browserPageId).sort()
 }
