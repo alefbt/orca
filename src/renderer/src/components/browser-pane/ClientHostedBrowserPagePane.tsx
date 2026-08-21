@@ -292,6 +292,9 @@ export function ClientHostedBrowserPagePane({
   )
 
   const showFailureOverlay = !attachmentError && Boolean(browserTab.loadError)
+  // Why: the failure is about the URL that failed, not whatever page is still loaded — feeding
+  // browserTab.url here named the previous page and offered it an HTTPS retry it never needed.
+  const failedNavigationUrl = browserTab.loadError?.validatedUrl ?? toDisplayUrl(browserTab.url)
   const browserZoomIndicatorState = getBrowserPageZoomIndicatorState({
     feedbackVisible: zoom.browserZoomFeedbackVisible,
     isDefaultZoom: zoom.browserZoomPercent === zoom.browserDefaultZoomPercent
@@ -358,15 +361,13 @@ export function ClientHostedBrowserPagePane({
         {showFailureOverlay && browserTab.loadError ? (
           <BrowserLoadFailureOverlay
             loadError={browserTab.loadError}
-            currentUrl={toDisplayUrl(browserTab.url)}
-            httpsRecoveryUrl={toHttpsRecoveryUrl(browserTab.url)}
+            currentUrl={toDisplayUrl(failedNavigationUrl)}
+            httpsRecoveryUrl={toHttpsRecoveryUrl(failedNavigationUrl)}
             onRetry={() => reload.runReloadTrigger('reload')}
             onTryHttps={navigateToUrl}
             onCopy={(url) => void window.api.ui.writeClipboardText(url)}
             onOpenExternal={(url) => void window.api.shell.openUrl(url)}
-            externalUrl={getOpenableExternalUrl(
-              browserTab.loadError.validatedUrl || browserTab.url
-            )}
+            externalUrl={getOpenableExternalUrl(failedNavigationUrl)}
             certificateFailure={certificateFailure}
             expectedBrowserPageId={browserTab.id}
             // Why: the guest is a local Electron webview on this desktop, so its certificate

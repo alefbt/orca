@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   BrowserCertificateFailure,
+  BrowserLoadError,
   BrowserPage
 } from '../../../../shared/browser-workspace-types'
 import type {
@@ -198,6 +199,121 @@ describe('ClientHostedBrowserPagePane chrome parity', () => {
     expect(failed.webview.style.display).toBe('none')
   })
 
+  // Why: the overlay is about the navigation that failed. Naming browserTab.url instead pointed
+  // every action at the page still loaded and offered it an HTTPS retry it never needed.
+  it('names the URL that failed, not the page that is still loaded', () => {
+    const loaded = 'http://localhost:3000/app'
+    const { onUpdatePageState } = renderPane({ url: loaded })
+
+    const addressBar = screen.getByRole('combobox')
+    act(() => {
+      fireEvent.change(addressBar, { target: { value: 'javascript:alert(1)' } })
+    })
+    act(() => {
+      fireEvent.submit(addressBar.closest('form') ?? addressBar)
+    })
+
+    const loadError = onUpdatePageState.mock.calls.at(-1)?.[1]?.loadError as
+      | BrowserLoadError
+      | undefined
+    expect(loadError?.validatedUrl).toBe('javascript:alert(1)')
+
+    cleanup()
+    renderPane({ loadError, url: loaded })
+
+    act(() => screen.getByRole('button', { name: 'Copy Address' }).click())
+    expect(writeClipboardText).toHaveBeenCalledWith('javascript:alert(1)')
+    // The loaded page is a localhost http URL, so keying off it would offer an HTTPS retry here.
+    expect(screen.queryByRole('button', { name: 'Try HTTPS' })).toBeNull()
+  })
+
+  it('drives the guest from the find bar rather than only rendering it', () => {
+    const { webview } = renderPane()
+
+    act(() => findRequests.emit(undefined))
+    act(() => {
+      fireEvent.change(screen.getByPlaceholderText('Find in page...'), {
+        target: { value: 'needle' }
+      })
+    })
+    act(() => {
+      fireEvent.keyDown(screen.getByPlaceholderText('Find in page...'), { key: 'Enter' })
+    })
+
+    expect(webview.findInPage).toHaveBeenCalledWith(
+      'needle',
+      expect.objectContaining({ forward: true })
+    )
+  })
+
+  // Why: the toolbar button is Stop mid-load; passing the plain 'reload' trigger would restart the
+  // navigation the user is trying to cancel.
+  it('stops an in-flight load from the toolbar button', () => {
+    const { webview } = renderPane({ loading: true })
+
+    act(() => screen.getByRole('button', { name: 'Stop' }).click())
+
+    expect(webview.stop).toHaveBeenCalledTimes(1)
+    expect(webview.reload).not.toHaveBeenCalled()
+  })
+
+  it('titles a navigation optimistically instead of leaving the tab on New Tab', () => {
+    const { onUpdatePageState } = renderPane()
+
+    const addressBar = screen.getByRole('combobox')
+    act(() => {
+      fireEvent.change(addressBar, { target: { value: 'https://example.internal/next' } })
+    })
+    act(() => {
+      fireEvent.submit(addressBar.closest('form') ?? addressBar)
+    })
+
+    expect(onUpdatePageState).toHaveBeenCalledWith(
+      'page-a',
+      expect.objectContaining({ title: 'https://example.internal/next' })
+    )
+  })
+
+  // Why: a Kagi private-session link carries an account bearer token, and the store and address bar
+  // are both persisted surfaces.
+  it('keeps a Kagi session token out of the stored page and the address bar', () => {
+    const { onUpdatePageState, webview } = renderPane()
+
+    const addressBar = screen.getByRole('combobox')
+    act(() => {
+      fireEvent.change(addressBar, {
+        target: { value: 'https://kagi.com/search?q=orca&token=secret-token' }
+      })
+    })
+    act(() => {
+      fireEvent.submit(addressBar.closest('form') ?? addressBar)
+    })
+
+    const stored = onUpdatePageState.mock.calls.at(-1)?.[1] as { title: string }
+    expect(stored.title).not.toContain('secret-token')
+    expect((addressBar as HTMLInputElement).value).not.toContain('secret-token')
+    // The guest still gets the real link — redaction is about what Orca keeps, not what loads.
+    expect(webview.loadURL).toHaveBeenCalledWith(
+      'https://kagi.com/search?q=orca&token=secret-token'
+    )
+  })
+
+  // Why: an unattached pane has no guest to reload, so the load-failure overlay's actions would be
+  // dead buttons stacked on the notice that actually explains the situation.
+  it('shows only the unavailable notice when the guest never attached', () => {
+    renderPane(
+      {
+        loadError: { code: -105, description: 'ERR_NAME_NOT_RESOLVED', validatedUrl: 'https://x/' }
+      },
+      { attaches: false }
+    )
+
+    expect(screen.getByText('Client-hosted browser unavailable')).not.toBeNull()
+    // 'Copy Address' belongs to the load-failure overlay alone; the toolbar's own button reads
+    // 'Retry' whenever a loadError stands, attached or not.
+    expect(screen.queryByRole('button', { name: 'Copy Address' })).toBeNull()
+  })
+
   it('says so when the page asks for a permission Orca denied', () => {
     renderPane()
 
@@ -259,15 +375,20 @@ function contextMenuEvent(
   } as BrowserContextMenuRequestedEvent
 }
 
-function renderPane(overrides: Partial<BrowserPage> = {}): {
+function renderPane(
+  overrides: Partial<BrowserPage> = {},
+  options: { attaches?: boolean } = {}
+): {
   webview: Electron.WebviewTag & { setZoomLevel: ReturnType<typeof vi.fn> }
+  onUpdatePageState: ReturnType<typeof vi.fn>
 } {
   const webview = createWebview()
-  mocks.attach.mockReturnValue({
-    webview,
-    detach: vi.fn(),
-    nextMetadataRevision: vi.fn(() => 1)
-  })
+  const onUpdatePageState = vi.fn()
+  mocks.attach.mockReturnValue(
+    options.attaches === false
+      ? null
+      : { webview, detach: vi.fn(), nextMetadataRevision: vi.fn(() => 1) }
+  )
   render(
     <TooltipProvider>
       <ClientHostedBrowserPagePane
@@ -278,12 +399,12 @@ function renderPane(overrides: Partial<BrowserPage> = {}): {
         worktreeId="worktree-a"
         placement={PLACEMENT}
         isActive
-        onUpdatePageState={vi.fn()}
+        onUpdatePageState={onUpdatePageState}
         onSetUrl={vi.fn()}
       />
     </TooltipProvider>
   )
-  return { webview }
+  return { onUpdatePageState, webview }
 }
 
 function page(overrides: Partial<BrowserPage> = {}): BrowserPage {
