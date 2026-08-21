@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { planBrowserWorkspaceTabClose } from './browser-workspace-tab-close-plan'
 import { getBrowserWorkspaceRemoteOwnership } from './remote-browser-tab-ownership'
 
-function state(pages: { id: string; environmentId?: string }[]): never {
+function state(pages: { id: string; environmentId?: string; staged?: true }[]): never {
   return {
     browserPagesByWorkspace: {
       'workspace-a': pages.map((page) => ({ id: page.id, browserRuntimeEnvironmentId: null }))
@@ -12,14 +12,18 @@ function state(pages: { id: string; environmentId?: string }[]): never {
         .filter((page) => page.environmentId)
         .map((page) => [
           page.id,
-          { environmentId: page.environmentId, remotePageId: `remote-${page.id}` }
+          {
+            environmentId: page.environmentId,
+            remotePageId: `remote-${page.id}`,
+            ...(page.staged ? { staged: true } : {})
+          }
         ])
     )
   } as never
 }
 
 function plan(
-  pages: { id: string; environmentId?: string }[],
+  pages: { id: string; environmentId?: string; staged?: true }[],
   options: { focusedEnvironmentId?: string | null; activeEnvironmentIds?: string[] } = {}
 ): ReturnType<typeof planBrowserWorkspaceTabClose> {
   const active = new Set(options.activeEnvironmentIds ?? [])
@@ -32,6 +36,51 @@ function plan(
 }
 
 describe('planBrowserWorkspaceTabClose', () => {
+  // Why: a staged page names its environment before the host has minted the page, so without this
+  // case the owner branch closes a tab id the host has never heard of — the X does nothing and the
+  // in-flight create's snapshot then puts the tab back.
+  it('unwinds a staged tab locally instead of closing it on a host that has not created it', () => {
+    expect(
+      plan([{ id: 'page-1', environmentId: 'env-a', staged: true }], {
+        activeEnvironmentIds: ['env-a']
+      })
+    ).toEqual({
+      hostEnvironmentIds: [],
+      closesLocally: true,
+      removesVisibleTab: true,
+      localCloseReason: 'cleanup'
+    })
+  })
+
+  // Why: adoption is exactly the moment ownership transfers, and it is the snapshot clearing the
+  // staged flag that marks it — the same workspace must flip from a local unwind to a host close.
+  it('hands the same workspace back to its host once adoption clears the staged flag', () => {
+    const staged = plan([{ id: 'page-1', environmentId: 'env-a', staged: true }], {
+      activeEnvironmentIds: ['env-a']
+    })
+    const adopted = plan([{ id: 'page-1', environmentId: 'env-a' }], {
+      activeEnvironmentIds: ['env-a']
+    })
+
+    expect(staged.closesLocally).toBe(true)
+    expect(adopted).toEqual({
+      hostEnvironmentIds: ['env-a'],
+      closesLocally: false,
+      removesVisibleTab: false
+    })
+    expect(adopted.localCloseReason).toBeUndefined()
+  })
+
+  // Why: the cleanup reason is what keeps an unwound create out of the reopen stack and off the
+  // empty-worktree landing, so no ordinary local teardown may carry it.
+  it('marks only the staged case as a cleanup close', () => {
+    expect(plan([{ id: 'page-1' }]).localCloseReason).toBeUndefined()
+    expect(
+      plan([{ id: 'page-1', environmentId: 'env-a' }], { activeEnvironmentIds: [] })
+        .localCloseReason
+    ).toBeUndefined()
+  })
+
   it('closes a single owner on its host and leaves the tab for host sync to remove', () => {
     expect(
       plan([{ id: 'page-1', environmentId: 'env-a' }], { activeEnvironmentIds: ['env-a'] })

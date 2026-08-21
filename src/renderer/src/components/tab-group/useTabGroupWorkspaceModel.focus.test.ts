@@ -454,7 +454,7 @@ describe('useTabGroupWorkspaceModel terminal activation focus', () => {
       storeBox.state.browserPagesByWorkspace,
       'browser-workspace-1'
     )
-    expect(mocks.closeBrowserTab).toHaveBeenCalledWith('browser-workspace-1')
+    expect(mocks.closeBrowserTab).toHaveBeenCalledWith('browser-workspace-1', undefined)
   })
 
   it('retains a remote-owned browser guest until the host close settles', async () => {
@@ -662,6 +662,6 @@ describe('useTabGroupWorkspaceModel terminal activation focus', () => {
     expect(mocks.closeWebRuntimeSessionTab).toHaveBeenCalledWith(
       expect.objectContaining({ worktreeId: 'wt-1', tabId: 'browser-unified-1' })
     )
-    expect(mocks.closeUnifiedTab).toHaveBeenCalledWith('browser-unified-1')
+    expect(mocks.closeUnifiedTab).toHaveBeenCalledWith('browser-unified-1', undefined)
   })
 })

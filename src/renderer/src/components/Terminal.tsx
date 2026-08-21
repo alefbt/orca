@@ -1771,10 +1771,16 @@ function Terminal(): React.JSX.Element | null {
         }
         return
       }
+      const closeOptions = plan.localCloseReason ? { reason: plan.localCloseReason } : undefined
       const currentTabs = state.browserTabsByWorktree[owningWorktreeId] ?? []
       if (currentTabs.length <= 1) {
         destroyWorkspaceWebviews(state.browserPagesByWorkspace, tabId)
-        closeBrowserTab(tabId)
+        closeBrowserTab(tabId, closeOptions)
+        // Why: the fallback below answers "the user emptied this worktree". Unwinding a create
+        // that never finished is not that, so it must leave the selection as the click found it.
+        if (plan.localCloseReason === 'cleanup') {
+          return
+        }
         if (state.activeWorktreeId === owningWorktreeId) {
           const worktreeFile = state.openFiles.find((file) => file.worktreeId === owningWorktreeId)
           if (worktreeFile) {
@@ -1800,7 +1806,7 @@ function Terminal(): React.JSX.Element | null {
         }
       }
       destroyWorkspaceWebviews(state.browserPagesByWorkspace, tabId)
-      closeBrowserTab(tabId)
+      closeBrowserTab(tabId, closeOptions)
     },
     [
       closeBrowserTab,
@@ -1843,6 +1849,7 @@ function Terminal(): React.JSX.Element | null {
         if (unifiedTab?.isPinned) {
           continue
         }
+        let browserCloseOptions: { reason: 'cleanup' } | undefined
         if (unifiedTab?.contentType === 'browser') {
           const plan = closeBrowserWorkspaceTabOnHosts({
             state,
@@ -1857,6 +1864,9 @@ function Terminal(): React.JSX.Element | null {
             }
             continue
           }
+          browserCloseOptions = plan.localCloseReason
+            ? { reason: plan.localCloseReason }
+            : undefined
         }
         if (
           unifiedTab?.contentType === 'terminal' &&
@@ -1882,7 +1892,7 @@ function Terminal(): React.JSX.Element | null {
           (state.browserTabsByWorktree[activeWorktreeId] ?? []).some((tab) => tab.id === id)
         ) {
           destroyWorkspaceWebviews(state.browserPagesByWorkspace, id)
-          closeBrowserTab(id)
+          closeBrowserTab(id, browserCloseOptions)
         } else if (unifiedTab?.contentType === 'simulator') {
           // Why: simulator tabs live only in the unified-tab store, so the
           // entity-store checks above never match them.

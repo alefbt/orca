@@ -20,6 +20,11 @@ export type BrowserWorkspaceTabClosePlan = {
    * removes its own mirror through tab sync; removing it here too would race that.
    */
   removesVisibleTab: boolean
+  /**
+   * Set when the local teardown unwinds a tab that was never finished being created. Such a close
+   * owns no host page, so it must not reach the reopen stack or the empty-worktree landing.
+   */
+  localCloseReason?: 'cleanup'
 }
 
 /**
@@ -45,7 +50,15 @@ export function planBrowserWorkspaceTabClose({
     closesLocally: true,
     removesVisibleTab: true
   }
-  const hasPages = (state.browserPagesByWorkspace[workspaceId] ?? []).length > 0
+  const pages = state.browserPagesByWorkspace[workspaceId] ?? []
+  // Why: a staged page names an environment before the host has ever heard of the tab, so the owner
+  // branch below would fan session.tabs.close at a page id that does not exist yet — an inert X, and
+  // the in-flight create's snapshot then puts the tab back. The create path owns retiring the host
+  // page; the strip only unwinds the rows this client minted. Must stay ahead of every other case.
+  if (pages.some((page) => state.remoteBrowserPageHandlesByPageId[page.id]?.staged === true)) {
+    return { ...closeLocally, localCloseReason: 'cleanup' }
+  }
+  const hasPages = pages.length > 0
   const ownerEnvironmentIds = getBrowserWorkspaceRemoteOwnerEnvironmentIds(state, workspaceId)
   if (ownerEnvironmentIds.length > 0) {
     const activeEnvironmentIds = ownerEnvironmentIds.filter((environmentId) =>

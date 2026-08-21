@@ -68,12 +68,22 @@ export function useTabGroupTabCloseCommands({
         visibleTabId: item.id,
         focusedEnvironmentId
       })
+      // Why: both teardown sites take the reason. closeBrowserTab usually removes the visible tab
+      // itself, but when it cannot find it the bare call below is the one that runs — and a cleanup
+      // close that lands there without these options hands the user an empty-worktree landing.
+      const cleanupOptions =
+        plan.localCloseReason === 'cleanup'
+          ? { preserveWorktreeSelection: true, recordInteraction: false }
+          : undefined
       if (plan.closesLocally) {
         destroyWorkspaceWebviews(state.browserPagesByWorkspace, item.entityId)
-        closeBrowserTab(item.entityId)
+        closeBrowserTab(
+          item.entityId,
+          plan.localCloseReason ? { reason: plan.localCloseReason } : undefined
+        )
       }
       if (plan.removesVisibleTab) {
-        closeUnifiedTab(item.id)
+        closeUnifiedTab(item.id, cleanupOptions)
       }
       return plan
     },
@@ -103,7 +113,10 @@ export function useTabGroupTabCloseCommands({
         return
       }
       if (item.contentType === 'browser') {
-        if (!closeBrowserItem(item, runtimeEnvironmentId).closesLocally) {
+        const plan = closeBrowserItem(item, runtimeEnvironmentId)
+        // Why: the empty check below answers "the user emptied this worktree". Unwinding a create
+        // that never finished is not that — it must leave the selection as the click found it.
+        if (!plan.closesLocally || plan.localCloseReason === 'cleanup') {
           return
         }
       } else if (item.contentType === 'simulator') {
