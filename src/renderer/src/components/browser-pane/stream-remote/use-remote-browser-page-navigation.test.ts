@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { act, cleanup, renderHook } from '@testing-library/react'
-import { createRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAppStore } from '@/store'
 import type { BrowserPage } from '../../../../../shared/browser-workspace-types'
@@ -32,7 +31,9 @@ function renderNavigation(): ReturnType<
     useRemoteBrowserPageNavigation({
       browserTab: page(),
       isActive: true,
-      addressBarInputRef: createRef<HTMLInputElement>(),
+      stagedPage: false,
+      addressBarValue: 'about:blank',
+      setAddressBarValueFromPage: vi.fn(),
       lifecycle: {
         session: { ensureRemotePage: vi.fn(), scheduleTabInfoRefresh: vi.fn() }
       } as unknown as RemoteBrowserStreamLifecycle,
