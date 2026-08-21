@@ -86,6 +86,8 @@ import {
   setDriverForBrowserPage
 } from '@/lib/pane-manager/browser-mobile-driver-state'
 import { destroyPersistentWebview } from '@/components/browser-pane/host-guest/webview-registry'
+import { destroyWorkspaceWebviews } from '@/store/slices/browser-webview-cleanup'
+import { closeBrowserWorkspaceTabOnHosts } from '@/runtime/browser-workspace-tab-close'
 import { rememberLiveBrowserUrl } from '@/components/browser-pane/describe-page/live-browser-url-registry'
 import {
   acquireBrowserAutomationVisibility,
@@ -131,7 +133,6 @@ import {
   resolvePinnedTabLabel
 } from '../store/pinned-tab-close-guard'
 import {
-  closeWebRuntimeSessionTab,
   createWebRuntimeSessionTerminal,
   isWebRuntimeSessionActive
 } from '@/runtime/web-runtime-session'
@@ -2697,21 +2698,36 @@ export function useIpcEvents(): void {
           const worktreeId = store.activeWorktreeId
           const closeActiveBrowserTab = (): void => {
             const currentStore = useAppStore.getState()
-            const environmentId = getWorktreeRuntimeEnvironmentId(worktreeId)
-            if (environmentId && worktreeId) {
-              if (!isWebRuntimeSessionActive(environmentId)) {
-                currentStore.closeBrowserTab(tabId)
-                return
-              }
-              void closeWebRuntimeSessionTab({
-                worktreeId,
-                tabId,
-                environmentId,
-                reason: 'user'
-              })
+            if (!worktreeId) {
+              currentStore.closeBrowserTab(tabId)
               return
             }
-            currentStore.closeBrowserTab(tabId)
+            // Why: the menu's Close Tab used to decide ownership itself — "runtime connected means
+            // the host owns it" — which fires an inert close at a local-only or still-staged tab.
+            // The shared plan is the one authority on who tears a browser workspace down.
+            const plan = closeBrowserWorkspaceTabOnHosts({
+              state: currentStore,
+              worktreeId,
+              workspaceId: tabId,
+              visibleTabId: tabId,
+              focusedEnvironmentId: getWorktreeRuntimeEnvironmentId(worktreeId)
+            })
+            if (plan.closesLocally) {
+              destroyWorkspaceWebviews(currentStore.browserPagesByWorkspace, tabId)
+              currentStore.closeBrowserTab(
+                tabId,
+                plan.localCloseReason ? { reason: plan.localCloseReason } : undefined
+              )
+              return
+            }
+            if (plan.removesVisibleTab) {
+              const mirroredTab = (currentStore.unifiedTabsByWorktree[worktreeId] ?? []).find(
+                (candidate) => candidate.contentType === 'browser' && candidate.entityId === tabId
+              )
+              if (mirroredTab) {
+                currentStore.closeUnifiedTab(mirroredTab.id)
+              }
+            }
           }
           if (worktreeId && isUnifiedTabPinned(store, worktreeId, tabId)) {
             guardPinnedTabClose({
