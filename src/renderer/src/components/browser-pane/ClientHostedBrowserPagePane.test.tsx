@@ -20,7 +20,9 @@ vi.mock('@/runtime/web-runtime-session', () => ({
   createWebRuntimeSessionBrowserTab: mocks.createBrowserTab
 }))
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn(), loading: vi.fn(), message: vi.fn() }
+}))
 
 const PLACEMENT = {
   kind: 'client' as const,
@@ -47,34 +49,17 @@ vi.mock('./assemble-chrome/BrowserAddressBar', () => ({
 }))
 
 import { useAppStore } from '@/store'
+import { normalizeBrowserNavigationUrl } from '../../../../shared/browser-url'
 import { requestBrowserFocus } from './host-guest/browser-focus'
+import { installClientHostedPaneApi } from './client-hosted-browser-pane-test-rig'
 import { ClientHostedBrowserPagePane } from './ClientHostedBrowserPagePane'
 
 describe('ClientHostedBrowserPagePane', () => {
   beforeEach(() => {
     mocks.attach.mockReset()
     mocks.call.mockReset().mockResolvedValue({ ok: true, result: { accepted: true } })
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: {
-        runtimeEnvironments: { call: mocks.call },
-        // Download and popup notices subscribe on mount; their behavior has its own suites.
-        browser: {
-          onDownloadRequested: () => () => {},
-          onDownloadFinished: () => () => {},
-          onPopup: () => () => {}
-        },
-        // The intro-tour hook records a feature interaction on first view.
-        ui: {
-          recordFeatureInteraction: vi.fn(async () => ({
-            featureInteractions: {},
-            contextualToursSeenIds: []
-          })),
-          set: vi.fn(async () => ({})),
-          onFocusBrowserAddressBar: () => () => {}
-        }
-      }
-    })
+    // Download, popup and permission notices subscribe on mount; each has its own suite.
+    installClientHostedPaneApi({ runtimeEnvironments: { call: mocks.call } })
   })
   afterEach(() => cleanup())
 
@@ -264,8 +249,11 @@ describe('ClientHostedBrowserPagePane', () => {
         onSetUrl={vi.fn()}
       />
     )
+    // Why: after chrome-error://, reload() only refreshes the error page — retry must force
+    // navigation back to the attempted URL, exactly as the local pane's Retry does.
     act(() => screen.getByText('Retry').click())
-    expect(webview.reload).toHaveBeenCalledTimes(1)
+    expect(webview.reload).not.toHaveBeenCalled()
+    expect(webview.src).toBe(normalizeBrowserNavigationUrl(loadError.validatedUrl))
   })
 
   it('shows exact-generation unavailability without creating a fallback guest', () => {
@@ -459,25 +447,7 @@ describe('ClientHostedBrowserPagePane address bar parity', () => {
       return frameCallbacks.length
     })
     vi.stubGlobal('cancelAnimationFrame', () => {})
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: {
-        runtimeEnvironments: { call: vi.fn(async () => ({ ok: true, result: {} })) },
-        browser: {
-          onDownloadRequested: () => () => {},
-          onDownloadFinished: () => () => {},
-          onPopup: () => () => {}
-        },
-        ui: {
-          recordFeatureInteraction: vi.fn(async () => ({
-            featureInteractions: {},
-            contextualToursSeenIds: []
-          })),
-          set: vi.fn(async () => ({})),
-          onFocusBrowserAddressBar: () => () => {}
-        }
-      }
-    })
+    installClientHostedPaneApi()
     useAppStore.setState({
       browserUrlHistory: [],
       pendingAddressBarFocusByPageId: {},

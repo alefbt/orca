@@ -31,6 +31,7 @@ export function BrowserNavigationControlRow({
   addressBarInputRef,
   dismissSuggestionsRef,
   reloadControl,
+  reloadLabel,
   addressBarLeadingIcon,
   children
 }: {
@@ -41,6 +42,8 @@ export function BrowserNavigationControlRow({
   addressBarInputRef: React.RefObject<HTMLInputElement | null>
   dismissSuggestionsRef?: React.MutableRefObject<(() => void) | null>
   reloadControl?: React.ReactNode
+  /** Accessible name for the default reload button, which doubles as Stop and Retry. */
+  reloadLabel?: string
   /** Replaces the address bar's leading globe (e.g. the SSH egress indicator). */
   addressBarLeadingIcon?: React.ReactNode
   children?: React.ReactNode
@@ -76,7 +79,7 @@ export function BrowserNavigationControlRow({
           variant="ghost"
           className="h-7 w-7"
           onClick={controls.reload}
-          aria-label={translate('browser.navigation.reload', 'Reload')}
+          aria-label={reloadLabel ?? translate('browser.navigation.reload', 'Reload')}
         >
           {controls.loading ? (
             <Loader2 className="size-4 animate-spin" />

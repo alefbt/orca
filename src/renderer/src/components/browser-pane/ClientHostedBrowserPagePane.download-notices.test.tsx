@@ -12,43 +12,27 @@ vi.mock('sonner', () => ({ toast: toastMocks }))
 
 import type {
   BrowserDownloadFinishedEvent,
+  BrowserDownloadProgressEvent,
   BrowserDownloadRequestedEvent
 } from '../../../../shared/browser-guest-events'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { installClientHostedPaneApi, paneChannel } from './client-hosted-browser-pane-test-rig'
 import { ClientHostedBrowserPagePane } from './ClientHostedBrowserPagePane'
 
-type Listeners = {
-  requested: ((event: BrowserDownloadRequestedEvent) => void)[]
-  finished: ((event: BrowserDownloadFinishedEvent) => void)[]
-}
-
-const listeners: Listeners = { requested: [], finished: [] }
+let requested = paneChannel<BrowserDownloadRequestedEvent>()
+let progress = paneChannel<BrowserDownloadProgressEvent>()
+let finished = paneChannel<BrowserDownloadFinishedEvent>()
 
 beforeEach(() => {
-  listeners.requested = []
-  listeners.finished = []
+  requested = paneChannel<BrowserDownloadRequestedEvent>()
+  progress = paneChannel<BrowserDownloadProgressEvent>()
+  finished = paneChannel<BrowserDownloadFinishedEvent>()
   // Only the preload boundary is faked: the pane subscribes through the real window.api surface.
-  Object.defineProperty(window, 'api', {
-    configurable: true,
-    value: {
-      browser: {
-        onDownloadRequested: (callback: (event: BrowserDownloadRequestedEvent) => void) => {
-          listeners.requested.push(callback)
-          return () => {
-            listeners.requested = listeners.requested.filter((entry) => entry !== callback)
-          }
-        },
-        onDownloadFinished: (callback: (event: BrowserDownloadFinishedEvent) => void) => {
-          listeners.finished.push(callback)
-          return () => {
-            listeners.finished = listeners.finished.filter((entry) => entry !== callback)
-          }
-        },
-        onPopup: () => () => {}
-      },
-      // The pane's chrome-focus rules subscribe to the Cmd/Ctrl+L forward; focus has its own suite.
-      ui: { onFocusBrowserAddressBar: () => () => {} },
-      runtimeEnvironments: { call: vi.fn(async () => ({})) }
+  installClientHostedPaneApi({
+    browser: {
+      onDownloadRequested: requested.subscribe,
+      onDownloadProgress: progress.subscribe,
+      onDownloadFinished: finished.subscribe
     }
   })
 })
@@ -102,11 +86,7 @@ function emitRequested(overrides: Partial<BrowserDownloadRequestedEvent> = {}): 
     status: 'downloading',
     ...overrides
   } as BrowserDownloadRequestedEvent
-  act(() => {
-    for (const listener of listeners.requested) {
-      listener(event)
-    }
-  })
+  act(() => requested.emit(event))
 }
 
 function emitFinished(overrides: Partial<BrowserDownloadFinishedEvent> = {}): void {
@@ -118,19 +98,15 @@ function emitFinished(overrides: Partial<BrowserDownloadFinishedEvent> = {}): vo
     error: null,
     ...overrides
   } as BrowserDownloadFinishedEvent
-  act(() => {
-    for (const listener of listeners.finished) {
-      listener(event)
-    }
-  })
+  act(() => finished.emit(event))
 }
 
 describe('ClientHostedBrowserPagePane download notices', () => {
   it('subscribes to the download lifecycle for the page it renders', () => {
     renderPane()
 
-    expect(listeners.requested).toHaveLength(1)
-    expect(listeners.finished).toHaveLength(1)
+    expect(requested.listenerCount()).toBe(1)
+    expect(finished.listenerCount()).toBe(1)
   })
 
   it('names the remote workspace destination when the download lands there', () => {
