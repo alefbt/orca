@@ -1620,6 +1620,9 @@ function browserWorkspaceHasRemoteEnvironmentPage(
  * page that has not produced a real title yet arrives as its own url — or as the bare default.
  * Neither says anything the local row does not already say better, so while the page still sits at
  * the url this client gave it, the local title stands and only a real navigation replaces it.
+ *
+ * Scope: the pre-adoption/staged window, and every placement the host actually drives. Adopted
+ * client-placed rows never reach here — see resolveMirroredBrowserPageContent.
  */
 function resolveMirroredBrowserTitle(
   tab: RuntimeMobileSessionBrowserTab,
@@ -1632,6 +1635,40 @@ function resolveMirroredBrowserTitle(
     return existingPage.title
   }
   return published || 'Browser'
+}
+
+/**
+ * A client-placed page's content lives in this client's own guest webview; the host only ever
+ * learns it second-hand through a fire-and-forget metadata publish, so its snapshot is a stale
+ * echo at best and the registry's `'Browser'`/create-time defaults at worst. Once a local row
+ * exists it is the truth, exactly as it already is for loadError and certificateFailure.
+ *
+ * The url is part of the payload and not just a symptom: rewinding it to the host's create-time
+ * value is what breaks the staged-title hold's url-equality arm on the following snapshot.
+ *
+ * A row with no local truth (fresh mirror on another client, reload restore) still takes the host
+ * values — that client has no guest of its own, so a stale echo beats nothing.
+ */
+function resolveMirroredBrowserPageContent(
+  tab: RuntimeMobileSessionBrowserTab,
+  existingPage: BrowserPage | undefined
+): Pick<BrowserPage, 'url' | 'title' | 'loading' | 'canGoBack' | 'canGoForward'> {
+  if (tab.placement?.kind === 'client' && existingPage) {
+    return {
+      url: existingPage.url,
+      title: existingPage.title,
+      loading: existingPage.loading,
+      canGoBack: existingPage.canGoBack,
+      canGoForward: existingPage.canGoForward
+    }
+  }
+  return {
+    url: tab.url,
+    title: resolveMirroredBrowserTitle(tab, existingPage),
+    loading: tab.loading,
+    canGoBack: tab.canGoBack,
+    canGoForward: tab.canGoForward
+  }
 }
 
 function buildMirroredBrowserTabs(
@@ -1680,17 +1717,13 @@ function buildMirroredBrowserTabs(
         ? preferredClientGroupId
         : undefined
     const groupId = clientGroupId ?? hostGroupId
-    const title = resolveMirroredBrowserTitle(tab, existing?.page)
+    const content = resolveMirroredBrowserPageContent(tab, existing?.page)
     const nextPage: BrowserPage = {
       id: pageId,
       workspaceId,
       worktreeId: snapshot.worktree,
-      url: tab.url,
-      title,
-      loading: tab.loading,
+      ...content,
       faviconUrl: existing?.page.faviconUrl ?? null,
-      canGoBack: tab.canGoBack,
-      canGoForward: tab.canGoForward,
       // Why: a client-hosted page's load failure is observed by the local guest webview and the
       // host publishes no loadError for it, so the host snapshot must not clear the local record.
       loadError:
