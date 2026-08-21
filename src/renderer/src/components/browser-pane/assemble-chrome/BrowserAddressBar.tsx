@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Globe } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -7,6 +7,8 @@ import { useAppStore } from '@/store'
 import { DEFAULT_SEARCH_ENGINE, type SearchEngine } from '../../../../../shared/browser-url'
 import { buildBrowserAddressBarSuggestions } from './browser-address-bar-suggestions'
 import { shouldOverlayBrowserAddressBar } from './browser-address-bar-expansion'
+import { saveBrowserAddressBarEditSession } from './browser-address-bar-edit-session'
+import type { BrowserAddressBarEditSessionBinding } from './use-browser-address-bar-edit-session'
 import BrowserAddressBarSuggestionList from './BrowserAddressBarSuggestionList'
 
 type BrowserAddressBarProps = {
@@ -16,6 +18,11 @@ type BrowserAddressBarProps = {
   onNavigate: (url: string) => void
   inputRef: React.RefObject<HTMLInputElement | null>
   dismissSuggestionsRef?: React.MutableRefObject<(() => void) | null>
+  /**
+   * Set by panes React can swap out from under a live edit, so an unmount mid-typing is handed on
+   * to whatever mounts next for the same page. Panes that never remount leave it off.
+   */
+  editSession?: BrowserAddressBarEditSessionBinding | null
   /** Replaces the leading globe (e.g. the SSH egress indicator). */
   leadingIcon?: React.ReactNode
 }
@@ -27,6 +34,7 @@ export default function BrowserAddressBar({
   onNavigate,
   inputRef,
   dismissSuggestionsRef,
+  editSession,
   leadingIcon
 }: BrowserAddressBarProps): React.ReactElement {
   const [open, setOpen] = useState(false)
@@ -60,6 +68,50 @@ export default function BrowserAddressBar({
   }, [])
 
   const overlay = shouldOverlayBrowserAddressBar({ inlineWidth, focused: open })
+
+  const editSessionPageId = editSession?.pageId ?? null
+  const resumedSuggestionsOpen = editSession?.resumedSuggestionsOpen ?? null
+  const liveEditRef = useRef({ value, open })
+  useLayoutEffect(() => {
+    liveEditRef.current = { value, open }
+  })
+
+  useLayoutEffect(() => {
+    if (resumedSuggestionsOpen === null) {
+      return
+    }
+    // Why after the fact rather than as the initial state: the pane resumes in its own layout
+    // effect, which runs after this bar has already mounted (and after the focus it takes has
+    // opened the dropdown the way a fresh click would). This is what puts it back as the user
+    // left it. Re-arming the blur grace window keeps the resumed focus from closing it again.
+    openedAtRef.current = Date.now()
+    setOpen(resumedSuggestionsOpen)
+  }, [resumedSuggestionsOpen])
+
+  // Why layout and not a passive cleanup: React destroys passive effects for a deleted tree after
+  // its DOM is gone, and by then document.activeElement is the body — every edit would read idle.
+  useLayoutEffect(() => {
+    const input = inputRef.current
+    if (!editSessionPageId || !input) {
+      return
+    }
+    return () => {
+      // Why only a focused bar: an idle one has no edit to hand on, and resuming it would seize
+      // focus and reopen a dropdown for a user who was reading the page.
+      if (document.activeElement !== input) {
+        return
+      }
+      saveBrowserAddressBarEditSession(editSessionPageId, {
+        draft: liveEditRef.current.value,
+        selection: {
+          start: input.selectionStart ?? input.value.length,
+          end: input.selectionEnd ?? input.value.length,
+          direction: input.selectionDirection ?? 'none'
+        },
+        suggestionsOpen: liveEditRef.current.open
+      })
+    }
+  }, [editSessionPageId, inputRef])
 
   const clearAddressBarTimers = useCallback((): void => {
     if (blurCloseTimerRef.current !== null) {

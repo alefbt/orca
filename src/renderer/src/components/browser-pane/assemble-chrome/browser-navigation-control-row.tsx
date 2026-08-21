@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
 import BrowserAddressBar from './BrowserAddressBar'
+import type { BrowserAddressBarEditSessionBinding } from './use-browser-address-bar-edit-session'
 
 /**
  * The history/reload/navigate surface a browser backend must provide to be driven by
@@ -30,6 +31,7 @@ export function BrowserNavigationControlRow({
   onSubmitAddressBar,
   addressBarInputRef,
   dismissSuggestionsRef,
+  addressBarEditSession,
   reloadControl,
   reloadLabel,
   addressBarLeadingIcon,
@@ -41,6 +43,8 @@ export function BrowserNavigationControlRow({
   onSubmitAddressBar: () => void
   addressBarInputRef: React.RefObject<HTMLInputElement | null>
   dismissSuggestionsRef?: React.MutableRefObject<(() => void) | null>
+  /** Set by panes React remounts mid-edit; see BrowserAddressBar's `editSession`. */
+  addressBarEditSession?: BrowserAddressBarEditSessionBinding | null
   reloadControl?: React.ReactNode
   /** Accessible name for the default reload button, which doubles as Stop and Retry. */
   reloadLabel?: string
@@ -96,6 +100,7 @@ export function BrowserNavigationControlRow({
         onNavigate={controls.navigate}
         inputRef={addressBarInputRef}
         dismissSuggestionsRef={dismissSuggestionsRef}
+        editSession={addressBarEditSession}
         leadingIcon={addressBarLeadingIcon}
       />
 

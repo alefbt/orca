@@ -9,6 +9,7 @@ import {
 } from '../host-guest/browser-focus'
 import { browserOverlayOwnsShortcutTarget } from '../describe-page/browser-overlay-shortcut-target'
 import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-types'
+import type { BrowserAddressBarSelection } from './browser-address-bar-edit-session'
 import type { BrowserPageGuestFocus } from './browser-page-guest-focus'
 
 /** Frames an address-bar grab keeps retrying before it lets the guest have focus back. */
@@ -34,8 +35,13 @@ export function useBrowserPageChromeFocus({
   addressBarInputRef: RefObject<HTMLInputElement | null>
   guestFocus: BrowserPageGuestFocus
 }): {
-  focusAddressBarNow: () => boolean
+  focusAddressBarNow: (selection?: BrowserAddressBarSelection) => boolean
   focusGuestNow: () => boolean
+  /**
+   * Takes the address bar and holds it against whatever re-grabs focus a frame later. Pass a
+   * selection to resume an edit already in progress instead of selecting the bar's whole text.
+   */
+  startAddressBarFocusGrab: (selection?: BrowserAddressBarSelection) => () => void
   /** Set while a focus grab is in flight, so panes don't hand focus back to the guest mid-retry. */
   keepAddressBarFocusRef: MutableRefObject<boolean>
 } {
@@ -48,16 +54,25 @@ export function useBrowserPageChromeFocus({
     addressBarFocusGrabRef.current?.()
   }, [])
 
-  const focusAddressBarNow = useCallback(() => {
-    const input = addressBarInputRef.current
-    if (!input) {
-      return false
-    }
-    guestFocus.blur()
-    input.focus()
-    input.select()
-    return document.activeElement === input
-  }, [addressBarInputRef, guestFocus])
+  const focusAddressBarNow = useCallback(
+    (selection?: BrowserAddressBarSelection) => {
+      const input = addressBarInputRef.current
+      if (!input) {
+        return false
+      }
+      guestFocus.blur()
+      input.focus()
+      if (selection) {
+        // Why: focusing the bar fires its own select-on-focus, which would throw away the caret a
+        // resumed edit is being restored to — so put it back after the focus event has run.
+        input.setSelectionRange(selection.start, selection.end, selection.direction)
+      } else {
+        input.select()
+      }
+      return document.activeElement === input
+    },
+    [addressBarInputRef, guestFocus]
+  )
 
   const focusGuestNow = useCallback(() => {
     // Why: blurring for a guest that isn't there strands focus on document.body, where no
@@ -77,40 +92,46 @@ export function useBrowserPageChromeFocus({
    * raises is cleared when the grab ends either way: only the local pane has load handlers that
    * would otherwise clear it, so a latch left standing locks the rest out of their own page.
    */
-  const startAddressBarFocusGrab = useCallback((): (() => void) => {
-    cancelAddressBarFocusGrab()
-    let cancelled = false
-    let frameId = 0
-    let attempts = 0
-    const cancel = (): void => {
-      // Why: unguarded, a stale canceller clears the ref out from under whichever grab is live
-      // now, and the cleanup meant to cancel that one then finds nothing left to call.
-      if (addressBarFocusGrabRef.current !== cancel) {
-        return
-      }
-      addressBarFocusGrabRef.current = null
-      cancelled = true
-      window.cancelAnimationFrame(frameId)
-      keepAddressBarFocusRef.current = false
-    }
-    const focusAddressBar = (): void => {
-      if (cancelled) {
-        return
-      }
-      focusAddressBarNow()
-      attempts += 1
-      if (attempts < ADDRESS_BAR_FOCUS_FRAMES) {
-        frameId = window.requestAnimationFrame(focusAddressBar)
-      } else {
+  const startAddressBarFocusGrab = useCallback(
+    (selection?: BrowserAddressBarSelection): (() => void) => {
+      cancelAddressBarFocusGrab()
+      let cancelled = false
+      let frameId = 0
+      let attempts = 0
+      const cancel = (): void => {
+        // Why: unguarded, a stale canceller clears the ref out from under whichever grab is live
+        // now, and the cleanup meant to cancel that one then finds nothing left to call.
+        if (addressBarFocusGrabRef.current !== cancel) {
+          return
+        }
         addressBarFocusGrabRef.current = null
+        cancelled = true
+        window.cancelAnimationFrame(frameId)
         keepAddressBarFocusRef.current = false
       }
-    }
-    addressBarFocusGrabRef.current = cancel
-    keepAddressBarFocusRef.current = true
-    frameId = window.requestAnimationFrame(focusAddressBar)
-    return cancel
-  }, [cancelAddressBarFocusGrab, focusAddressBarNow])
+      const focusAddressBar = (): void => {
+        if (cancelled) {
+          return
+        }
+        focusAddressBarNow(selection)
+        attempts += 1
+        if (attempts < ADDRESS_BAR_FOCUS_FRAMES) {
+          frameId = window.requestAnimationFrame(focusAddressBar)
+        } else {
+          addressBarFocusGrabRef.current = null
+          keepAddressBarFocusRef.current = false
+        }
+      }
+      addressBarFocusGrabRef.current = cancel
+      keepAddressBarFocusRef.current = true
+      // Why the first attempt is not deferred to a frame: callers that follow a grab with work
+      // keyed off the bar actually holding focus — the URL-follow guards do — run before any frame
+      // callback, and would read the bar as idle and overwrite the edit the grab is protecting.
+      focusAddressBar()
+      return cancel
+    },
+    [cancelAddressBarFocusGrab, focusAddressBarNow]
+  )
 
   useEffect(() => {
     if (!isActive) {
@@ -225,5 +246,5 @@ export function useBrowserPageChromeFocus({
     }
   }, [browserTabId, cancelAddressBarFocusGrab, focusGuestNow, isActive, startAddressBarFocusGrab])
 
-  return { focusAddressBarNow, focusGuestNow, keepAddressBarFocusRef }
+  return { focusAddressBarNow, focusGuestNow, startAddressBarFocusGrab, keepAddressBarFocusRef }
 }
