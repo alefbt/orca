@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserPage, BrowserWorkspace } from '../../../../../shared/browser-workspace-types'
@@ -242,12 +243,20 @@ function adoptOntoServer(): void {
   })
 }
 
+/**
+ * Why the suite runs twice: every dev build renders under StrictMode, whose double-invoked effects
+ * tear down and rebuild a mount that never went anywhere — which is exactly the shape the save and
+ * resume here key off. A fix that only holds in production holds for nobody developing on it.
+ */
+let strictMode = false
+
 function renderWorkspacePane(): void {
-  render(
+  const pane = (
     <TooltipProvider>
       <BrowserPane browserTab={browserWorkspace()} isActive chromeShortcutScope="focused" />
     </TooltipProvider>
   )
+  render(strictMode ? <StrictMode>{pane}</StrictMode> : pane)
   act(() => flushFrames())
 }
 
@@ -265,10 +274,14 @@ function startEditing(text: string): HTMLInputElement {
   return input
 }
 
-describe('BrowserPane adoption keeps live address-bar chrome', () => {
+describe.each([
+  { tree: 'in a plain tree', strict: false },
+  { tree: 'under StrictMode', strict: true }
+])('BrowserPane adoption keeps live address-bar chrome ($tree)', ({ strict }) => {
   let webview: ReturnType<typeof createWebview>
 
   beforeEach(() => {
+    strictMode = strict
     frameCallbacks = []
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       frameCallbacks.push(callback)
@@ -334,6 +347,50 @@ describe('BrowserPane adoption keeps live address-bar chrome', () => {
     expect([adopted.selectionStart, adopted.selectionEnd]).toEqual([3, 7])
     expect(adopted.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('Example docs')).not.toBeNull()
+  })
+
+  // Why the draft alone is not enough here: while a suggestion is previewed the input holds that
+  // suggestion's URL, and the query the user typed lives only beside it. Carrying the draft and
+  // dropping the query leaves Escape with nothing to go back to.
+  it('carries the typed query behind a previewed suggestion through the swap', () => {
+    renderWorkspacePane()
+    const staged = startEditing('example')
+    act(() => {
+      fireEvent.keyDown(staged, { key: 'ArrowDown' })
+    })
+    expect(staged.value).toBe('https://example.internal/docs')
+
+    act(() => adoptOntoClient())
+    act(() => flushFrames())
+
+    const adopted = addressBar()
+    expect(adopted.value).toBe('https://example.internal/docs')
+    act(() => {
+      fireEvent.keyDown(adopted, { key: 'Escape' })
+    })
+    expect(adopted.value).toBe('example')
+  })
+
+  // Why: the resumed selection is restored against a bar the user is still typing into, and the
+  // grab holds that bar for several frames after the swap. Re-applying the old caret on each of
+  // them drags it back mid-word, and the next keystroke then replaces the selected text.
+  it('leaves the caret where the user puts it while the grab is still retrying', () => {
+    renderWorkspacePane()
+    const staged = startEditing('example.int')
+    act(() => staged.setSelectionRange(3, 7))
+
+    act(() => adoptOntoClient())
+
+    const adopted = addressBar()
+    act(() => {
+      fireEvent.change(adopted, { target: { value: 'example.internal/docs' } })
+    })
+    act(() => adopted.setSelectionRange(12, 12))
+    // The frames the grab would have spent re-taking the bar all land after the user typed.
+    act(() => flushFrames())
+
+    expect(adopted.value).toBe('example.internal/docs')
+    expect([adopted.selectionStart, adopted.selectionEnd]).toEqual([12, 12])
   })
 
   // Why the closed direction needs its own test: the resuming focus opens the dropdown on its own,

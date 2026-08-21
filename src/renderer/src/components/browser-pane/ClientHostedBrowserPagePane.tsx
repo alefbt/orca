@@ -107,6 +107,9 @@ export function ClientHostedBrowserPagePane({
     addressBarInputRef,
     guestFocus
   })
+  // Why the order matters: this resumes an interrupted edit in a layout effect, and the attach
+  // effect below syncs the bar to the guest's URL through the setter it hands back. Called after
+  // the attach effect, the resume would land on a bar that has already been overwritten.
   const { addressBarValue, setAddressBarValue, setAddressBarValueFromPage, addressBarEditSession } =
     useBrowserAddressBarEditSession({
       pageId: browserTab.id,
