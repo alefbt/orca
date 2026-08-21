@@ -1,6 +1,8 @@
 type PendingBrowserPlacement = {
   groupId: string
   ownsGroupCleanup: boolean
+  /** The host has published this page, so the create's group intent has been spent. */
+  adopted?: boolean
 }
 
 const placementByPendingPage = new Map<string, PendingBrowserPlacement>()
@@ -102,13 +104,33 @@ export function takeWebSessionBrowserPlacementGroup(args: {
   return placement?.groupId
 }
 
+/**
+ * The create's group intent is spent once the host publishes the page: from here the local row is
+ * the truth about where it sits, and re-applying the intent would drag the tab back out of a group
+ * the user moved it to. The entry itself stays — the group it named is still reserved against
+ * cleanup, and only the create that made it knows when that reservation can end.
+ */
+export function markWebSessionBrowserPlacementAdopted(args: {
+  environmentId: string
+  worktreeId: string
+  remotePageId: string
+}): void {
+  const key = pageKey(args.environmentId, args.worktreeId, args.remotePageId)
+  const placement = placementByPendingPage.get(key)
+  if (placement && !placement.adopted) {
+    placementByPendingPage.set(key, { ...placement, adopted: true })
+  }
+}
+
 export function peekWebSessionBrowserPlacementGroup(args: {
   environmentId: string
   worktreeId: string
   remotePageId: string
 }): string | undefined {
-  return placementByPendingPage.get(pageKey(args.environmentId, args.worktreeId, args.remotePageId))
-    ?.groupId
+  const placement = placementByPendingPage.get(
+    pageKey(args.environmentId, args.worktreeId, args.remotePageId)
+  )
+  return placement?.adopted ? undefined : placement?.groupId
 }
 
 export function isWebSessionBrowserPlacementGroupReserved(args: {

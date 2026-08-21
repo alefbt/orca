@@ -104,6 +104,7 @@ import {
   clearWebSessionBrowserPlacementsForEnvironment,
   clearWebSessionBrowserPlacementsForWorktree,
   isWebSessionBrowserPlacementGroupReserved,
+  markWebSessionBrowserPlacementAdopted,
   peekWebSessionBrowserPlacementGroup,
   resetWebSessionBrowserPlacementsForTests
 } from './web-session-browser-placement'
@@ -3289,6 +3290,10 @@ function applyWebSessionTabsSnapshotWithContext(
         ...(placement ? { placement } : {})
       }
     }
+    // Why here and not on the staged flag alone: the flag is cleared by this very block, so every
+    // later snapshot in the create's materialization wait would see an un-spent record and move the
+    // tab back to the group the create asked for.
+    markWebSessionBrowserPlacementAdopted({ environmentId, worktreeId, remotePageId })
     // Why: a client-hosted page's certificate failure is raised by the local guest webview and is
     // structurally absent from what the host publishes, so host snapshots must not own that record
     // — reconciling here would delete the local one on the next metadata update.

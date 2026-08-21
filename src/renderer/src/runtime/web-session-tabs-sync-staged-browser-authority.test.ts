@@ -220,6 +220,28 @@ describe('staged browser rows stay authoritative through adoption', () => {
     expect(layoutHasGroup(next.layoutByWorktree[WT], SPLIT_GROUP)).toBe(true)
   })
 
+  // Why a second snapshot: adoption clears the staged flag, but the create is still inside its
+  // materialization wait, so the record outlives the thing that was protecting the row from it.
+  // The host publishes on its own cadence and the next snapshot lands inside that window.
+  it('keeps the split through the snapshot that follows adoption', () => {
+    recordCreatePlacement()
+    const state = makeStagedState({
+      groupId: SPLIT_GROUP,
+      title: 'New Tab',
+      url: 'about:blank'
+    })
+
+    const adopted = applyPatch(state, makeSnapshot([hostTab('', 'about:blank')]))
+    expect(groupOf(adopted, UNIFIED_TAB_ID)).toBe(SPLIT_GROUP)
+    // The staged flag is gone — whatever holds the row now cannot be keyed on it.
+    expect(adopted.remoteBrowserPageHandlesByPageId[PAGE_ID]?.staged).toBeUndefined()
+
+    const second = applyPatch(adopted, makeSnapshot([hostTab('', 'about:blank')]))
+
+    expect(groupOf(second, UNIFIED_TAB_ID)).toBe(SPLIT_GROUP)
+    expect(layoutHasGroup(second.layoutByWorktree[WT], SPLIT_GROUP)).toBe(true)
+  })
+
   it('still honours the create record for a row the client never placed', () => {
     recordCreatePlacement()
     // No local row at all: the host mirrored the page under its own ids, so the record is the
