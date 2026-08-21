@@ -588,6 +588,15 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     BROWSER_NETWORK_TUNNEL_RUNTIME_CAPABILITY,
     BROWSER_NETWORK_EXECUTION_HOSTS_RUNTIME_CAPABILITY
   ].every((capability) => advertisedCapabilities.includes(capability))
+  // Why: mirrors prepareBrowserClientHostPlacement's own decision from the inputs this client
+  // already has, so the staged pane mounts as the kind of pane the create will produce. Only a
+  // cached status that disagrees with the live one costs the swap this avoids.
+  const expectsClientHosting =
+    (args.placementPreference ?? 'auto') !== 'server' &&
+    hostAdvertisesClientHosting &&
+    useAppStore.getState().settings?.browserClientHostedRemoteEnabled !== false &&
+    useAppStore.getState().runtimeStatusByEnvironmentId?.get(environmentId)?.status?.deviceScope !==
+      'mobile'
   let unsubscribeFocusGuard = (): void => {}
   let guardedPageId = provisionalPageId
   let createdPageId: string | null = null
@@ -623,7 +632,8 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         : {}),
       ...(args.stagedFocusAddressBar !== undefined
         ? { focusAddressBar: args.stagedFocusAddressBar }
-        : {})
+        : {}),
+      clientHosted: expectsClientHosting
     })
     // Why: sample the focus expectation and arm its guard against the state staging just wrote,
     // before any await. Sampling after the client-host preparation round-trip baked a switch made

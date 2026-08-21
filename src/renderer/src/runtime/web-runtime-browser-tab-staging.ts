@@ -4,6 +4,7 @@ import { useAppStore } from '../store'
 export type StagedWebRuntimeBrowserTab = {
   workspaceId: string
   pageId: string
+  clientHosted: boolean
 }
 
 /**
@@ -22,6 +23,7 @@ export function stageWebRuntimeBrowserTab(args: {
   targetGroupId?: string
   activate: boolean
   focusAddressBar?: boolean
+  clientHosted?: boolean
 }): StagedWebRuntimeBrowserTab | null {
   const state = useAppStore.getState()
   try {
@@ -43,9 +45,10 @@ export function stageWebRuntimeBrowserTab(args: {
     useAppStore.getState().setRemoteBrowserPageHandle(pageId, {
       environmentId: args.environmentId,
       remotePageId: args.remotePageId,
-      staged: true
+      staged: true,
+      ...(args.clientHosted ? { stagedClientHosted: true } : {})
     })
-    return { workspaceId: workspace.id, pageId }
+    return { workspaceId: workspace.id, pageId, clientHosted: args.clientHosted === true }
   } catch (error) {
     // Why: staging is an optimization; a store-side refusal must not fail the create itself.
     console.warn(
@@ -134,7 +137,8 @@ export function rehomeStagedWebRuntimeBrowserTab(
   useAppStore.getState().setRemoteBrowserPageHandle(staged.pageId, {
     environmentId: args.environmentId,
     remotePageId: args.remotePageId,
-    staged: true
+    staged: true,
+    ...(staged.clientHosted ? { stagedClientHosted: true } : {})
   })
   return staged
 }

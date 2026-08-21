@@ -264,11 +264,24 @@ describe('staged browser rows stay authoritative through adoption', () => {
       url: 'about:blank'
     })
 
-    // A fresh about:blank page publishes no title; the default must not overwrite the staged one.
-    const next = applyPatch(state, makeSnapshot([hostTab('', 'about:blank')]))
+    // The host publishes `title || url || 'Browser'`, so an untitled fresh page arrives titled with
+    // its own url. Neither that nor the bare default may overwrite the staged title.
+    const next = applyPatch(state, makeSnapshot([hostTab('about:blank', 'about:blank')]))
 
     expect(next.browserPagesByWorkspace[WORKSPACE_ID]?.[0]?.title).toBe('New Tab')
     expect(next.browserTabsByWorktree[WT]?.[0]?.title).toBe('New Tab')
+  })
+
+  it('keeps the staged title when the host falls all the way back to its default', () => {
+    const state = makeStagedState({
+      groupId: CREATE_GROUP,
+      title: 'New Tab',
+      url: 'about:blank'
+    })
+
+    const next = applyPatch(state, makeSnapshot([hostTab('Browser', 'about:blank')]))
+
+    expect(next.browserPagesByWorkspace[WORKSPACE_ID]?.[0]?.title).toBe('New Tab')
   })
 
   it('takes the title from a real navigation', () => {
@@ -281,6 +294,25 @@ describe('staged browser rows stay authoritative through adoption', () => {
     const next = applyPatch(state, makeSnapshot([hostTab('Example Domain', 'https://example.com/')]))
 
     expect(next.browserPagesByWorkspace[WORKSPACE_ID]?.[0]?.title).toBe('Example Domain')
+  })
+
+  // Why this is not the same as the case above: the host's url fallback is indistinguishable from
+  // a real title by shape alone. Once the page has moved off the url this client gave it, the
+  // staged title describes a page that is no longer loaded and must stop winning.
+  it('stops holding the staged title once the page navigates away', () => {
+    const state = makeStagedState({
+      groupId: CREATE_GROUP,
+      title: 'New Tab',
+      url: 'about:blank'
+    })
+
+    // A navigated page that has not produced a title yet: the host publishes its url as the title.
+    const next = applyPatch(
+      state,
+      makeSnapshot([hostTab('https://example.com/', 'https://example.com/')])
+    )
+
+    expect(next.browserPagesByWorkspace[WORKSPACE_ID]?.[0]?.title).toBe('https://example.com/')
   })
 
   it('falls back to the default title for a page this client never staged', () => {

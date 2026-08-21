@@ -33,7 +33,10 @@ import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-b
 import { useBrowserPageReloadActions } from './navigate/use-browser-page-reload-actions'
 import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
 import { resolveActiveBrowserLoadFailure } from './navigate/browser-load-failure-for-url'
-import { consumeBrowserPageDeferredNavigation } from './navigate/browser-page-deferred-navigation'
+import {
+  consumeBrowserPageDeferredNavigation,
+  deferBrowserPageNavigation
+} from './navigate/browser-page-deferred-navigation'
 import {
   getBrowserDisplayTitle,
   getOpenableExternalUrl,
@@ -61,7 +64,8 @@ export function ClientHostedBrowserPagePane({
   workspaceId: string
   runtimeEnvironmentId: string
   worktreeId: string
-  placement: RuntimeBrowserClientPlacement
+  /** Null while the tab is still an optimistic stage: the host mints the placement, not this client. */
+  placement: RuntimeBrowserClientPlacement | null
   isActive: boolean
   chromeShortcutScope: BrowserChromeShortcutScope
   onUpdatePageState: (tabId: string, updates: BrowserTabPageState) => void
@@ -85,7 +89,9 @@ export function ClientHostedBrowserPagePane({
   const certificateFailure = useAppStore(
     (s) => s.browserCertificateFailuresByPageId[browserTab.id] ?? null
   )
-  const { browserHostClientId, browserHostGeneration, pageHostGeneration } = placement
+  const browserHostClientId = placement?.browserHostClientId ?? null
+  const browserHostGeneration = placement?.browserHostGeneration ?? null
+  const pageHostGeneration = placement?.pageHostGeneration ?? null
   // Why: a client-hosted guest is created by main's host runtime, so there is no local guest to
   // recreate — a lost one is page unavailability, whose panel offers the reopen-on-server escape.
   const retryGuestRecoveryRef = useRef<() => void>(() => {})
@@ -128,7 +134,9 @@ export function ClientHostedBrowserPagePane({
   useBrowserClientHostedDownloadNotices(browserTab.id)
   useBrowserClientHostedPopupNotices(browserTab.id)
   useBrowserClientHostedPermissionNotices(browserTab.id)
-  useClientHostedBrowserIntroTour(isActive && !attachmentError)
+  // Why: the tour points at controls that cannot work yet, and recording the interaction is a
+  // one-way write that would burn the tour on a pane the user has not really seen.
+  useClientHostedBrowserIntroTour(isActive && !attachmentError && placement !== null)
   useBrowserPageFindShortcuts({
     browserTabId: browserTab.id,
     workspaceId,
@@ -156,6 +164,10 @@ export function ClientHostedBrowserPagePane({
       }
       const webview = webviewRef.current
       if (!webview) {
+        // Why: the page is still an optimistic stage, so park the URL for the attach effect to
+        // replay rather than dropping what the user just typed.
+        deferBrowserPageNavigation(browserTab.id, submission.url)
+        setAddressBarValue(toDisplayUrl(redactKagiSessionToken(submission.url)))
         return
       }
       // Why: the store and the address bar must never hold a Kagi session token, and an optimistic
@@ -177,7 +189,10 @@ export function ClientHostedBrowserPagePane({
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
-    if (!viewport) {
+    // Why: no placement means the host has not minted this page yet. Attaching would throw for an
+    // id the retained registry has never seen and strand the pane on the unavailable notice, whose
+    // only exit is reopening on the server — so mount quiet and wait for adoption to supply it.
+    if (!viewport || pageHostGeneration === null || browserHostClientId === null || browserHostGeneration === null) {
       return
     }
     let attachment: ReturnType<typeof attachBrowserClientPageToViewport>
@@ -336,7 +351,7 @@ export function ClientHostedBrowserPagePane({
           controls={{
             canGoBack: browserTab.canGoBack,
             canGoForward: browserTab.canGoForward,
-            loading: browserTab.loading,
+            loading: placement === null || browserTab.loading,
             goBack: () => webviewRef.current?.goBack(),
             goForward: () => webviewRef.current?.goForward(),
             reload: () => reload.runReloadTrigger('button'),

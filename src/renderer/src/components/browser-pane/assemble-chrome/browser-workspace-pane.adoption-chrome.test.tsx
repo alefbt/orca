@@ -221,6 +221,20 @@ function stageHandle(): void {
   })
 }
 
+/** The optimistic handle for a page this client already expects to host itself. */
+function stageClientHostedHandle(): void {
+  useAppStore.setState({
+    remoteBrowserPageHandlesByPageId: {
+      [PAGE_ID]: {
+        environmentId: ENVIRONMENT_ID,
+        remotePageId: 'remote-page-a',
+        staged: true,
+        stagedClientHosted: true
+      }
+    }
+  })
+}
+
 /** The host snapshot arriving: the staged flag drops and the page lands on this desktop. */
 function adoptOntoClient(pageHostGeneration = CLIENT_PLACEMENT.pageHostGeneration): void {
   useAppStore.setState({
@@ -523,6 +537,51 @@ describe.each([
     act(() => flushFrames())
 
     expect(webview.loadURL).toHaveBeenCalledWith('https://example.internal/deferred')
+  })
+
+  // Why element identity and not the draft: every other assertion here is satisfied by a save and
+  // resume across a remount. Only the same input node proves adoption never tore the chrome down —
+  // a teardown is what replays the suggestion dropdown's open animation over the user's typing.
+  it('adopts a client-hosted page without remounting the chrome', () => {
+    stageClientHostedHandle()
+    renderWorkspacePane()
+
+    // The client-hosted pane mounts from the first frame, so there is no pane to swap at adoption.
+    expect(screen.queryByTestId('streamed-viewport')).toBeNull()
+    // The host has not minted this page yet: attaching would throw for an id the retained registry
+    // has never seen and strand the pane on the unavailable notice.
+    expect(mocks.attach).not.toHaveBeenCalled()
+    expect(screen.queryByText('Client-hosted browser unavailable')).toBeNull()
+
+    const staged = startEditing('example.int')
+    act(() => staged.setSelectionRange(3, 7))
+    expect(staged.getAttribute('aria-expanded')).toBe('true')
+
+    act(() => adoptOntoClient())
+    act(() => flushFrames())
+
+    expect(addressBar()).toBe(staged)
+    expect(staged.getAttribute('aria-expanded')).toBe('true')
+    expect(staged.value).toBe('example.int')
+    expect(document.activeElement).toBe(staged)
+    expect([staged.selectionStart, staged.selectionEnd]).toEqual([3, 7])
+    expect(mocks.attach).toHaveBeenCalled()
+  })
+
+  it('holds a URL submitted against a staged client-hosted page until its guest attaches', () => {
+    stageClientHostedHandle()
+    renderWorkspacePane()
+    const staged = startEditing('https://example.internal/client-deferred')
+    act(() => {
+      fireEvent.submit(staged.closest('form') ?? staged)
+    })
+
+    expect(webview.loadURL).not.toHaveBeenCalled()
+
+    act(() => adoptOntoClient())
+    act(() => flushFrames())
+
+    expect(webview.loadURL).toHaveBeenCalledWith('https://example.internal/client-deferred')
   })
 
   it('replays a URL held against the staged page when a headless host adopts it', async () => {

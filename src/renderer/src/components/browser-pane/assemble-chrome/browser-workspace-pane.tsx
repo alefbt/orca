@@ -96,15 +96,22 @@ export default function BrowserPane({
   }, [activeBrowserPageId])
 
   if (activeBrowserRuntimeEnvironmentId) {
-    const clientPlacement =
-      activeRemotePageHandle?.environmentId === activeBrowserRuntimeEnvironmentId &&
-      activeRemotePageHandle.placement?.kind === 'client'
-        ? activeRemotePageHandle.placement
+    const environmentHandle =
+      activeRemotePageHandle?.environmentId === activeBrowserRuntimeEnvironmentId
+        ? activeRemotePageHandle
         : null
+    const clientPlacement =
+      environmentHandle?.placement?.kind === 'client' ? environmentHandle.placement : null
+    // Why: a staged page this client expects to host itself mounts the client-hosted pane from the
+    // first frame. The host mints the placement, so keying on it would swap component and key at
+    // adoption — a remount that replays open dropdowns and throws away focus and drafts. The pane
+    // renders connecting until adoption fills the placement in.
+    const stagedClientHosted =
+      environmentHandle?.staged === true && environmentHandle.stagedClientHosted === true
     return activeBrowserPage ? (
-      clientPlacement ? (
+      clientPlacement || stagedClientHosted ? (
         <ClientHostedBrowserPagePane
-          key={`${clientPlacement.browserHostClientId}:${activeBrowserPage.id}:${clientPlacement.pageHostGeneration}`}
+          key={`${activeBrowserRuntimeEnvironmentId}:${activeBrowserPage.id}`}
           browserTab={activeBrowserPage}
           workspaceId={browserTab.id}
           runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}

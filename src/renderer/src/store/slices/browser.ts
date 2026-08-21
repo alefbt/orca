@@ -126,6 +126,12 @@ export type RemoteBrowserPageHandle = {
   placement?: RuntimeBrowserPlacement
   /** Optimistically staged by this client; the host has not published the page yet. */
   staged?: true
+  /**
+   * This client expects to host the staged page itself. The real placement is minted host-side and
+   * only arrives with the snapshot, so the pane needs this to mount as the right kind of pane from
+   * the first frame instead of swapping components at adoption.
+   */
+  stagedClientHosted?: true
 }
 
 export type BrowserCookieImportExecutionResult = BrowserCookieImportResult & {

@@ -444,7 +444,8 @@ describe('createWebRuntimeSessionBrowserTab optimistic staging', () => {
 
     discardStagedWebRuntimeBrowserTab({
       workspaceId: 'adopted-workspace',
-      pageId: 'adopted-page'
+      pageId: 'adopted-page',
+      clientHosted: false
     })
 
     expect(stagedBrowserTabMocks.closeBrowserTab).not.toHaveBeenCalled()
