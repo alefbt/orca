@@ -82,8 +82,10 @@ export function useBrowserAddressBarEditSession({
     if (resumedPageIdRef.current !== pageId) {
       resumedPageIdRef.current = pageId
       const session = consumeBrowserAddressBarEditSession(pageId)
+      // Why cleared rather than left standing: a page id that arrives with nothing parked must not
+      // inherit the previous one's caret. Today's deps make that unreachable; a future one need not.
+      resumedSelectionRef.current = session?.selection ?? null
       if (session) {
-        resumedSelectionRef.current = session.selection
         pendingCaretRef.current = session
         setAddressBarValue(session.draft)
         setResumed({ suggestionsOpen: session.suggestionsOpen, preview: session.preview })
@@ -95,7 +97,8 @@ export function useBrowserAddressBarEditSession({
     }
     // Why the grab sits outside that branch: the teardown on the way through a rebuild cancels
     // whatever grab is in flight, so a grab fired only on the consume leaves the rebuilt pane with
-    // nothing holding the bar, and its guest-attach effect takes focus to the page.
+    // nothing holding the bar, and its guest-attach effect takes focus to the page. Re-firing needs
+    // no canceller held here — startAddressBarFocusGrab cancels the previous grab itself.
     startAddressBarFocusGrab(selection)
   }, [pageId, startAddressBarFocusGrab])
 

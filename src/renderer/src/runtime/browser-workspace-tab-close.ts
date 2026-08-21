@@ -34,7 +34,9 @@ export function closeBrowserWorkspaceTabOnHosts({
   })
   // Why here: chrome the user was mid-way through — a half-typed URL, a URL submitted against a
   // page the host had not minted yet — is parked outside React under the page id, waiting for the
-  // pane that owns it. A close is the one exit where nobody is coming to collect it.
+  // pane that owns it, and this funnel is where every user-driven close of that pane lands. The two
+  // teardowns that bypass the funnel by design (the staged-create rollback, shutdownWorktreeBrowsers)
+  // leave the entries to the registries' own bounds: a microtask fence, a TTL, and unique page ids.
   for (const page of state.browserPagesByWorkspace[workspaceId] ?? []) {
     clearBrowserAddressBarEditSession(page.id)
     clearBrowserPageDeferredNavigation(page.id)

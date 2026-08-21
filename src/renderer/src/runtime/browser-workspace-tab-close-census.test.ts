@@ -75,7 +75,10 @@ const BROWSER_WORKSPACE_CLOSE_SITES: {
     reasonCarryingCloseCalls: 0,
     planReasonForwardings: 0,
     routesThroughPlan: false,
-    why: 'Unwinds rows this client minted for a create that never landed — there is no host page.'
+    why:
+      'Unwinds rows this client minted for a create that never landed — there is no host page. ' +
+      'Skipping the funnel also skips its parked-chrome release; the edit-session microtask fence ' +
+      'and the deferred-navigation TTL collect those.'
   },
   {
     path: 'src/renderer/src/store/slices/browser.ts',
@@ -83,7 +86,10 @@ const BROWSER_WORKSPACE_CLOSE_SITES: {
     reasonCarryingCloseCalls: 0,
     planReasonForwardings: 0,
     routesThroughPlan: false,
-    why: 'shutdownWorktreeBrowsers tears the whole worktree down; the slice is the seam itself.'
+    why:
+      'shutdownWorktreeBrowsers tears the whole worktree down; the slice is the seam itself. Same ' +
+      'carve-out for parked chrome as the staging rollback, and page ids are unique so a later ' +
+      "page cannot pick up a dead one's entry."
   }
 ]
 
