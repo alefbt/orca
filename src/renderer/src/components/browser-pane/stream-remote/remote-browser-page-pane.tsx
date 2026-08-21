@@ -25,6 +25,7 @@ import {
   useRemoteBrowserPageInput,
   useRemoteBrowserPageInputQueue
 } from './use-remote-browser-page-input'
+import { useRemoteBrowserPageChromeChords } from './use-remote-browser-page-chrome-chords'
 import { useRemoteBrowserPageWheel } from './use-remote-browser-page-wheel'
 import {
   RemoteBrowserPageContextMenu,
@@ -189,6 +190,7 @@ export function RemoteBrowserPagePane({
     addressBarInputRef,
     guestFocus
   })
+  useRemoteBrowserPageChromeChords({ isActive, runRemoteNavigation, setPaneNotice })
 
   // Why: focus given to the pane before the first frame can only land on the viewport, but the
   // screencast <img> is what carries key input — hand it over as soon as there is one.

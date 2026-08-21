@@ -84,6 +84,9 @@
       "streamedTooltip": "Browsing on {{value0}}",
       "clientHostedDetail": "The page renders on this device. Network traffic and DNS go through the remote host.",
       "streamedDetail": "The page runs on the remote host and streams to this device."
+    },
+    "remote": {
+      "findUnavailable": "Find in page is not available while this page streams from the remote host."
     }
   },
   "githubChecks": {
