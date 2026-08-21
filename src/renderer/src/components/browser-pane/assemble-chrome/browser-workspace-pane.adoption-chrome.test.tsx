@@ -568,6 +568,28 @@ describe.each([
     expect(mocks.attach).toHaveBeenCalled()
   })
 
+  // Why this path still matters: the staged pane is chosen from a cached runtime status, and a
+  // live one that disagrees sends the page to the server after all. That swap is the remount the
+  // client-hosted path no longer takes, so the edit-session registry has to still carry the edit.
+  it('carries a live edit when a staged client-hosted page is adopted onto the server', () => {
+    stageClientHostedHandle()
+    renderWorkspacePane()
+    expect(screen.queryByTestId('streamed-viewport')).toBeNull()
+
+    const staged = startEditing('fallback.internal')
+    act(() => staged.setSelectionRange(4, 4))
+
+    act(() => adoptOntoServer())
+    act(() => flushFrames())
+
+    // The pane really did fall back to the streamed one.
+    expect(screen.getByTestId('streamed-viewport')).not.toBeNull()
+    const adopted = addressBar()
+    expect(adopted.value).toBe('fallback.internal')
+    expect(document.activeElement).toBe(adopted)
+    expect([adopted.selectionStart, adopted.selectionEnd]).toEqual([4, 4])
+  })
+
   it('holds a URL submitted against a staged client-hosted page until its guest attaches', () => {
     stageClientHostedHandle()
     renderWorkspacePane()
