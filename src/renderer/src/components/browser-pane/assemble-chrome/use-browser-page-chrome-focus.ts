@@ -113,7 +113,12 @@ export function useBrowserPageChromeFocus({
         if (cancelled) {
           return
         }
-        focusAddressBarNow(selection)
+        // Why later frames skip a bar that is already ours: the retries exist to fight the guest
+        // taking focus back, and re-running the whole take on a bar nobody stole drags the caret
+        // off whatever the user has typed since — for the ~100ms the frames span.
+        if (attempts === 0 || document.activeElement !== addressBarInputRef.current) {
+          focusAddressBarNow(selection)
+        }
         attempts += 1
         if (attempts < ADDRESS_BAR_FOCUS_FRAMES) {
           frameId = window.requestAnimationFrame(focusAddressBar)
@@ -130,7 +135,7 @@ export function useBrowserPageChromeFocus({
       focusAddressBar()
       return cancel
     },
-    [cancelAddressBarFocusGrab, focusAddressBarNow]
+    [addressBarInputRef, cancelAddressBarFocusGrab, focusAddressBarNow]
   )
 
   useEffect(() => {

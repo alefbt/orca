@@ -5,11 +5,21 @@ export type BrowserAddressBarSelection = {
   direction: 'forward' | 'backward' | 'none'
 }
 
+/** A highlighted suggestion standing in the input in place of what the user typed. */
+export type BrowserAddressBarPreview = {
+  /** The typed query the input showed before the preview replaced it; what Escape goes back to. */
+  typedQuery: string
+  /** The suggestion URL currently filling the input. */
+  previewedUrl: string
+}
+
 /** An address-bar edit that was in progress when the chrome around it was torn down. */
 export type BrowserAddressBarEditSession = {
   draft: string
   selection: BrowserAddressBarSelection
   suggestionsOpen: boolean
+  /** Set only while a suggestion is being previewed, so the typed query is not lost with it. */
+  preview: BrowserAddressBarPreview | null
 }
 
 // Why this exists outside React: adopting a client-hosted page swaps the streamed pane for the
@@ -41,7 +51,11 @@ export function consumeBrowserAddressBarEditSession(
   return session
 }
 
-/** Drop a page's edit, so a close mid-typing cannot resume into whatever mounts next. */
+/**
+ * Drop a page's parked edit. The microtask above already bounds every write to the commit that
+ * made it, so this is hygiene rather than correctness: it keeps a closing page from leaving an
+ * entry behind for the rest of the tick.
+ */
 export function clearBrowserAddressBarEditSession(pageId: string): void {
   editSessionsByPageId.delete(pageId)
 }

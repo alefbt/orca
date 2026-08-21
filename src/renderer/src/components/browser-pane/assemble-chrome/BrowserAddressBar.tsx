@@ -70,23 +70,27 @@ export default function BrowserAddressBar({
   const overlay = shouldOverlayBrowserAddressBar({ inlineWidth, focused: open })
 
   const editSessionPageId = editSession?.pageId ?? null
-  const resumedSuggestionsOpen = editSession?.resumedSuggestionsOpen ?? null
+  const resumedChrome = editSession?.resumed ?? null
   const liveEditRef = useRef({ value, open })
   useLayoutEffect(() => {
     liveEditRef.current = { value, open }
   })
 
   useLayoutEffect(() => {
-    if (resumedSuggestionsOpen === null) {
+    if (!resumedChrome) {
       return
     }
     // Why after the fact rather than as the initial state: the pane resumes in its own layout
     // effect, which runs after this bar has already mounted (and after the focus it takes has
     // opened the dropdown the way a fresh click would). This is what puts it back as the user
     // left it. Re-arming the blur grace window keeps the resumed focus from closing it again.
+    if (resumedChrome.preview) {
+      prePreviewValueRef.current = resumedChrome.preview.typedQuery
+      setSelectedValueOverride(resumedChrome.preview.previewedUrl)
+    }
     openedAtRef.current = Date.now()
-    setOpen(resumedSuggestionsOpen)
-  }, [resumedSuggestionsOpen])
+    setOpen(resumedChrome.suggestionsOpen)
+  }, [resumedChrome])
 
   // Why layout and not a passive cleanup: React destroys passive effects for a deleted tree after
   // its DOM is gone, and by then document.activeElement is the body — every edit would read idle.
@@ -101,6 +105,7 @@ export default function BrowserAddressBar({
       if (document.activeElement !== input) {
         return
       }
+      const typedQuery = prePreviewValueRef.current
       saveBrowserAddressBarEditSession(editSessionPageId, {
         draft: liveEditRef.current.value,
         selection: {
@@ -108,7 +113,11 @@ export default function BrowserAddressBar({
           end: input.selectionEnd ?? input.value.length,
           direction: input.selectionDirection ?? 'none'
         },
-        suggestionsOpen: liveEditRef.current.open
+        suggestionsOpen: liveEditRef.current.open,
+        // Why the draft alone is not enough: mid-preview it holds the highlighted suggestion, and
+        // dropping this would strand the user with no way back to what they actually typed.
+        preview:
+          typedQuery === null ? null : { typedQuery, previewedUrl: liveEditRef.current.value }
       })
     }
   }, [editSessionPageId, inputRef])
