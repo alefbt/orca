@@ -171,9 +171,14 @@ async function runReconciliationFailureJourney(args: {
     expect(
       heldHost.tabs.some((tab) => tab.type === 'browser' && tab.browserPageId === createdPageId)
     ).toBe(true)
+    // Why: the tab is staged on click, so while the create is held the user already sees it —
+    // exactly one of it, in the new split. The rollback assertions after release are what prove
+    // the optimism is unwound rather than stranded.
     const heldClient = await readClientTabs(page, worktreeId)
-    expect(heldClient.browserTabIds).toEqual(baselineClient.browserTabIds)
-    expect(heldClient.browserWorkspaceIds).toEqual(baselineClient.browserWorkspaceIds)
+    expect(heldClient.browserTabIds).toHaveLength(baselineClient.browserTabIds.length + 1)
+    expect(heldClient.browserWorkspaceIds).toHaveLength(
+      baselineClient.browserWorkspaceIds.length + 1
+    )
     expect(heldClient.editorTabIds).toEqual(baselineClient.editorTabIds)
     expect(heldClient.terminalTabIds).toEqual(baselineClient.terminalTabIds)
     expect(heldClient.groupIds).toHaveLength(baselineClient.groupIds.length + 1)
