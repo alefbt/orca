@@ -138,3 +138,22 @@ error payload and read that instead. An old host omits it and the message match 
 covers them; once hosts that send it are the floor, the message match can be deleted
 rather than lived with at its ~10 call sites. Narrowing `isENOENT` back to `.code`
 without doing this reinstates the bug — the transport has already overwritten it.
+
+## Known hazard: clients ignore host-published failure fields on client-placed pages
+
+`RuntimeMobileSessionBrowserTab` — the browser tab a host publishes on the session-tab sync
+channel — permits `placement`, `loadError` and `certificateFailure` together. But for a tab
+whose `placement.kind` is `'client'` the engine runs in the client's own app: the failure is
+raised by the local guest webview, and the host has no view of it (`RuntimeBrowserClientPage`,
+what the registry actually publishes from, carries neither field). Clients from
+this version on therefore refuse host ownership of both records for client-placed pages
+(`web-session-tabs-sync.ts`, the `placement?.kind !== 'client'` carve-outs) — without that,
+each metadata snapshot deletes the locally recorded failure and the page's failure overlay
+disappears mid-navigation.
+
+The hazard is forward-facing and Rule 3 shaped. A host that later starts publishing
+`loadError` or `certificateFailure` for a client-placed page reaches these clients as content
+they silently drop, so the host would see no error and no effect. Publishing it has to be
+capability-gated, with the carve-out narrowed to clients that did not negotiate the
+capability. Note the cross-version harness does not exercise the session-tab sync channel, so
+nothing fails if this is forgotten — this note is the only record.

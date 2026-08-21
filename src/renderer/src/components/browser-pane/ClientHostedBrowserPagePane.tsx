@@ -36,6 +36,7 @@ import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overl
 import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-bar-navigation'
 import { useBrowserPageReloadActions } from './navigate/use-browser-page-reload-actions'
 import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
+import { resolveActiveBrowserLoadFailure } from './navigate/browser-load-failure-for-url'
 import {
   getBrowserDisplayTitle,
   getOpenableExternalUrl,
@@ -72,7 +73,10 @@ export function ClientHostedBrowserPagePane({
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const webviewRef = useRef<Electron.WebviewTag | null>(null)
   const addressBarInputRef = useRef<HTMLInputElement | null>(null)
-  const activeLoadFailureRef = useRef<BrowserLoadError | null>(null)
+  // Why: a worktree switch unmounts this pane while main keeps the guest, so the failure has to
+  // be seeded from the stored page — a fresh null here reads as "no failure" and the next sync
+  // writes that back, which also deletes the page's certificate record.
+  const activeLoadFailureRef = useRef<BrowserLoadError | null>(browserTab.loadError ?? null)
   const onUpdatePageStateRef = useRef(onUpdatePageState)
   const isActiveRef = useRef(isActive)
   const [addressBarValue, setAddressBarValue] = useState(toDisplayUrl(browserTab.url))
@@ -171,20 +175,34 @@ export function ClientHostedBrowserPagePane({
     })
     webviewRef.current = webview
     setAttachmentError(null)
+    // Why: the failure carried in from the store is hearsay — this pane may be remounting over a
+    // guest that navigated on while nothing was listening — so it is checked once against where
+    // the guest actually is. Failures this session observes are trusted as they arrive, because a
+    // navigation that fails outright often never commits and leaves the guest on the old URL.
+    activeLoadFailureRef.current = resolveActiveBrowserLoadFailure(
+      activeLoadFailureRef.current,
+      readClientPageMetadata(webview).url
+    )
     const syncNavigation = (event?: Event): void => {
       const eventUrl = (event as (Event & { url?: string }) | undefined)?.url
       const metadata = readClientPageMetadata(webview, eventUrl)
-      setUrlFromGuest(browserTab.id, metadata.url, {
-        preserveLoadError: true
-      })
+      // Why: did-stop-loading fires after did-fail-load, so an unconditional null here would
+      // wipe the failure the overlay is about to show.
+      const activeLoadFailure = activeLoadFailureRef.current
+      // Why: a URL write drops the page's certificate challenge by design (challenges are
+      // transient across navigation), so a standing failure must not run through one — the
+      // local pane returns before its own setUrl for the same reason.
+      if (!activeLoadFailure) {
+        setUrlFromGuest(browserTab.id, metadata.url, {
+          preserveLoadError: true
+        })
+      }
       updatePageStateFromGuest(browserTab.id, {
         title: metadata.title,
         loading: metadata.loading,
         canGoBack: metadata.canGoBack,
         canGoForward: metadata.canGoForward,
-        // Why: did-stop-loading fires after did-fail-load, so an unconditional null here
-        // would wipe the failure the overlay is about to show.
-        loadError: activeLoadFailureRef.current
+        loadError: activeLoadFailure
       })
       publisher.publish(metadata)
       // Why: the address bar's suggestions read the client's shared URL history, so a page

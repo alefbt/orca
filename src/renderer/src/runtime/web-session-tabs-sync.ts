@@ -1664,7 +1664,10 @@ function buildMirroredBrowserTabs(
       faviconUrl: existing?.page.faviconUrl ?? null,
       canGoBack: tab.canGoBack,
       canGoForward: tab.canGoForward,
-      loadError: tab.loadError ?? null,
+      // Why: a client-hosted page's load failure is observed by the local guest webview and the
+      // host publishes no loadError for it, so the host snapshot must not clear the local record.
+      loadError:
+        (tab.placement?.kind === 'client' ? existing?.page.loadError : tab.loadError) ?? null,
       createdAt,
       browserRuntimeEnvironmentId: environmentId,
       viewportPresetId: existing?.page.viewportPresetId ?? null
@@ -3243,7 +3246,11 @@ function applyWebSessionTabsSnapshotWithContext(
         ...(placement ? { placement } : {})
       }
     }
+    // Why: a client-hosted page's certificate failure is raised by the local guest webview and is
+    // structurally absent from what the host publishes, so host snapshots must not own that record
+    // — reconciling here would delete the local one on the next metadata update.
     if (
+      placement?.kind !== 'client' &&
       !browserCertificateFailureEqual(
         nextBrowserCertificateFailuresByPageId[page.id],
         certificateFailure
