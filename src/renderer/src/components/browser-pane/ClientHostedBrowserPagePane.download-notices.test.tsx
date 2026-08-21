@@ -101,6 +101,17 @@ function emitFinished(overrides: Partial<BrowserDownloadFinishedEvent> = {}): vo
   act(() => finished.emit(event))
 }
 
+function emitProgress(overrides: Partial<BrowserDownloadProgressEvent> = {}): void {
+  const event = {
+    downloadId: 'download-1',
+    receivedBytes: 2_202_009,
+    totalBytes: 8_388_608,
+    state: 'progressing',
+    ...overrides
+  } as BrowserDownloadProgressEvent
+  act(() => progress.emit(event))
+}
+
 describe('ClientHostedBrowserPagePane download notices', () => {
   it('subscribes to the download lifecycle for the page it renders', () => {
     renderPane()
@@ -164,5 +175,40 @@ describe('ClientHostedBrowserPagePane download notices', () => {
 
     expect(toastMocks.loading).not.toHaveBeenCalled()
     expect(toastMocks.success).not.toHaveBeenCalled()
+  })
+
+  // Why: bytes for a client-hosted page land on the remote workspace, so this toast is the only
+  // place a long download shows any movement at all.
+  it('moves the toast forward as bytes arrive', () => {
+    renderPane()
+    emitRequested()
+    toastMocks.loading.mockClear()
+
+    emitProgress()
+
+    expect(toastMocks.loading).toHaveBeenCalledWith('Downloading report.pdf… 2.1 MB / 8.0 MB', {
+      id: 'browser-download:download-1'
+    })
+  })
+
+  it('keeps the plain line when the server never reported a size', () => {
+    renderPane()
+    emitRequested()
+    toastMocks.loading.mockClear()
+
+    emitProgress({ totalBytes: null })
+
+    expect(toastMocks.loading).toHaveBeenCalledWith('Downloading report.pdf… 2.1 MB', {
+      id: 'browser-download:download-1'
+    })
+  })
+
+  it('ignores progress for a download this pane never started', () => {
+    renderPane()
+    toastMocks.loading.mockClear()
+
+    emitProgress()
+
+    expect(toastMocks.loading).not.toHaveBeenCalled()
   })
 })
