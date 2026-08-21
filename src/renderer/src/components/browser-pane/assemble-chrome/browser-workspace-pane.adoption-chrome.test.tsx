@@ -393,6 +393,30 @@ describe.each([
     expect([adopted.selectionStart, adopted.selectionEnd]).toEqual([12, 12])
   })
 
+  // Why the caret is asserted after a theft and not just after the swap: the resume's own caret
+  // restore is one-shot, spent on the commit that lands the draft. Everything after that rides on
+  // the selection the grab carries, and without it a retry re-takes the bar with select-all — one
+  // keystroke from wiping the draft it just rescued.
+  it('restores the caret, not a select-all, when the guest takes the bar back mid-grab', () => {
+    renderWorkspacePane()
+    const staged = startEditing('example.int')
+    act(() => staged.setSelectionRange(3, 7))
+
+    act(() => adoptOntoClient())
+    act(() => flushFrames(1))
+
+    const adopted = addressBar()
+    expect(document.activeElement).toBe(adopted)
+    act(() => webview.focus())
+    expect(document.activeElement).toBe(webview)
+
+    act(() => flushFrames())
+
+    expect(document.activeElement).toBe(adopted)
+    expect(adopted.value).toBe('example.int')
+    expect([adopted.selectionStart, adopted.selectionEnd]).toEqual([3, 7])
+  })
+
   // Why the closed direction needs its own test: the resuming focus opens the dropdown on its own,
   // so an open one survives whether or not the dropdown state is carried. Only a bar the user
   // dismissed with Escape — still focused, still holding their draft — proves it is.
