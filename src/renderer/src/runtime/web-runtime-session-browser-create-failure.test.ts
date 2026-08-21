@@ -6,6 +6,7 @@ import {
   WORKTREE_ID,
   makeSnapshot,
   resetBrowserTabCreateEnvironment,
+  stagedBrowserWorkspaces,
   stubBrowserTabCreateEnvironment
 } from './web-runtime-session-test-harness'
 
@@ -112,7 +113,9 @@ describe('createWebRuntimeSessionBrowserTab', () => {
     ).rejects.toThrow('did not confirm whether the browser tab was created')
 
     expect(runtimeCall).toHaveBeenCalledOnce()
-    expect(mocks.createBrowserTab).not.toHaveBeenCalled()
+    // The optimistic tab is staged on click, so an ambiguous failure has to unwind it.
+    expect(mocks.createBrowserTab).toHaveBeenCalledOnce()
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([])
   })
 
   it('cleans up a known page identity when the create acknowledgement is lost', async () => {
@@ -234,7 +237,7 @@ describe('createWebRuntimeSessionBrowserTab', () => {
       ).resolves.toBe(false)
 
       expect(runtimeCall).toHaveBeenCalledOnce()
-      expect(mocks.createBrowserTab).not.toHaveBeenCalled()
+      expect(stagedBrowserWorkspaces(mocks)).toEqual([])
     }
   )
 
@@ -332,7 +335,7 @@ describe('createWebRuntimeSessionBrowserTab', () => {
       })
     ).rejects.toThrow('could not recover the failed browser creation')
 
-    expect(mocks.createBrowserTab).not.toHaveBeenCalled()
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([])
     expect(mocks.closeEmptyGroup).toHaveBeenCalledWith(WORKTREE_ID, 'client-preview-group')
   })
 
@@ -387,8 +390,14 @@ describe('createWebRuntimeSessionBrowserTab', () => {
       })
     ).resolves.toBe(true)
 
-    expect(mocks.createBrowserTab).not.toHaveBeenCalled()
+    // The staged fields dress the optimistic tab; they must never reach the host.
+    expect(mocks.createBrowserTab).toHaveBeenCalledWith(
+      WORKTREE_ID,
+      'https://example.com/?q=private',
+      expect.objectContaining({ title: 'Search Google', focusAddressBar: false })
+    )
     expect(runtimeCall.mock.calls[0][0].params).not.toHaveProperty('stagedTitle')
+    expect(runtimeCall.mock.calls[0][0].params).not.toHaveProperty('stagedFocusAddressBar')
   })
 
   it('can log remote browser failure without retaining downstream details', async () => {

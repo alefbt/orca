@@ -124,6 +124,8 @@ export type RemoteBrowserPageHandle = {
   environmentId: string
   remotePageId: string
   placement?: RuntimeBrowserPlacement
+  /** Optimistically staged by this client; the host has not published the page yet. */
+  staged?: true
 }
 
 export type BrowserCookieImportExecutionResult = BrowserCookieImportResult & {
@@ -158,7 +160,7 @@ export type BrowserSlice = {
   ) => BrowserWorkspace
   openNewBrowserTabInActiveWorkspace: (groupId: string) => Promise<void>
   openBrowserProfileTabInActiveWorkspace: (url: string, profileId: string) => Promise<boolean>
-  closeBrowserTab: (tabId: string) => void
+  closeBrowserTab: (tabId: string, options?: { reason?: 'cleanup' }) => void
   shutdownWorktreeBrowsers: (worktreeId: string) => Promise<void>
   reopenClosedBrowserTab: (worktreeId: string) => BrowserWorkspace | null
   setActiveBrowserTab: (tabId: string) => void
@@ -808,7 +810,10 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
     })
     return true
   },
-  closeBrowserTab: (tabId) => {
+  closeBrowserTab: (tabId, options) => {
+    // Why: a cleanup close unwinds a tab that never finished being created — it owns no host
+    // page to close and must not enter the reopen stack as if the user had closed something.
+    const isCleanup = options?.reason === 'cleanup'
     let remotePagesToClose: { worktreeId: string; handle: RemoteBrowserPageHandle }[] = []
     set((s) => {
       let owningWorktreeId: string | null = null
@@ -840,10 +845,12 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         delete nextBrowserAnnotationsByPageId[page.id]
         delete nextBrowserCertificateFailuresByPageId[page.id]
       }
-      remotePagesToClose = closedPages.flatMap((page) => {
-        const handle = s.remoteBrowserPageHandlesByPageId[page.id]
-        return handle ? [{ worktreeId: page.worktreeId, handle }] : []
-      })
+      remotePagesToClose = isCleanup
+        ? []
+        : closedPages.flatMap((page) => {
+            const handle = s.remoteBrowserPageHandlesByPageId[page.id]
+            return handle ? [{ worktreeId: page.worktreeId, handle }] : []
+          })
       const nextRemoteBrowserPageHandlesByPageId = {
         ...s.remoteBrowserPageHandlesByPageId
       }
@@ -884,21 +891,21 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       }
 
       const nextRecentlyClosedBrowserTabsByWorktree = { ...s.recentlyClosedBrowserTabsByWorktree }
-      const existingSnapshots = nextRecentlyClosedBrowserTabsByWorktree[owningWorktreeId] ?? []
-      const position = getRecentlyClosedTabPosition(s, owningWorktreeId, tabId)
-      nextRecentlyClosedBrowserTabsByWorktree[owningWorktreeId] = [
-        {
-          workspace: closedWorkspace,
-          pages: closedPages,
-          ...(position ? { position } : {})
-        },
-        ...existingSnapshots.filter((entry) => entry.workspace.id !== closedWorkspace.id)
-      ].slice(0, 10)
-      const nextRecentlyClosedTabKindsByWorktree = pushRecentlyClosedTabKind(
-        s.recentlyClosedTabKindsByWorktree,
-        owningWorktreeId,
-        'browser'
-      )
+      if (!isCleanup) {
+        const existingSnapshots = nextRecentlyClosedBrowserTabsByWorktree[owningWorktreeId] ?? []
+        const position = getRecentlyClosedTabPosition(s, owningWorktreeId, tabId)
+        nextRecentlyClosedBrowserTabsByWorktree[owningWorktreeId] = [
+          {
+            workspace: closedWorkspace,
+            pages: closedPages,
+            ...(position ? { position } : {})
+          },
+          ...existingSnapshots.filter((entry) => entry.workspace.id !== closedWorkspace.id)
+        ].slice(0, 10)
+      }
+      const nextRecentlyClosedTabKindsByWorktree = isCleanup
+        ? s.recentlyClosedTabKindsByWorktree
+        : pushRecentlyClosedTabKind(s.recentlyClosedTabKindsByWorktree, owningWorktreeId, 'browser')
 
       const nextRecentlyClosedBrowserPagesByWorkspace = {
         ...s.recentlyClosedBrowserPagesByWorkspace
@@ -947,7 +954,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         (entry) => entry.contentType === 'browser' && entry.entityId === tabId
       )
       if (workspaceItem) {
-        get().closeUnifiedTab(workspaceItem.id)
+        get().closeUnifiedTab(workspaceItem.id, isCleanup ? { recordInteraction: false } : undefined)
       }
     }
   },

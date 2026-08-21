@@ -12,6 +12,7 @@ import { buildPersistedUnifiedTabSessionData } from './workspace-session-unified
 import { buildLastVisitedAtByWorktreeId } from './workspace-session-focus-recency'
 import { buildSleepingAgentSessionData } from './workspace-session-sleeping-agents'
 import { buildActiveConnectionIdsAtShutdown } from './workspace-session-reconnect-targets'
+import { withoutStagedBrowserTabs } from './workspace-session-staged-browser-tabs'
 
 export { buildActiveConnectionIdsAtShutdown }
 
@@ -41,6 +42,7 @@ export type WorkspaceSessionSnapshot = Pick<
   | 'browserPagesByWorkspace'
   | 'activeBrowserTabIdByWorktree'
   | 'browserUrlHistory'
+  | 'remoteBrowserPageHandlesByPageId'
   | 'unifiedTabsByWorktree'
   | 'groupsByWorktree'
   | 'layoutByWorktree'
@@ -76,6 +78,7 @@ export const SESSION_RELEVANT_FIELDS = [
   'browserPagesByWorkspace',
   'activeBrowserTabIdByWorktree',
   'browserUrlHistory',
+  'remoteBrowserPageHandlesByPageId',
   'unifiedTabsByWorktree',
   'groupsByWorktree',
   'layoutByWorktree',
@@ -291,8 +294,9 @@ export function buildTerminalSessionData(
 }
 
 export function buildWorkspaceSessionPayload(
-  snapshot: WorkspaceSessionSnapshot
+  fullSnapshot: WorkspaceSessionSnapshot
 ): WorkspaceSessionState {
+  const snapshot = withoutStagedBrowserTabs(fullSnapshot)
   const terminalSessionData = buildTerminalSessionData(snapshot)
 
   const payload = {

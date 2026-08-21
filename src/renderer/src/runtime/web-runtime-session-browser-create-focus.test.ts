@@ -151,7 +151,13 @@ describe('createWebRuntimeSessionBrowserTab', () => {
       mocks.applyFreshWebSessionTabsSnapshot.mock.invocationCallOrder[0]!
     )
     expect(peekWebSessionFocusIntent({ environmentId: ENVIRONMENT_ID }, WORKTREE_ID)).toBeNull()
-    expect(mocks.createBrowserTab).not.toHaveBeenCalled()
+    // Why: the optimistic tab must be runtime-backed — a local browser tab here would be the
+    // confusing split-ownership fallback the paired create path deliberately refuses.
+    expect(mocks.createBrowserTab).toHaveBeenCalledWith(
+      WORKTREE_ID,
+      'https://example.com/',
+      expect.objectContaining({ activate: true, browserRuntimeEnvironmentId: ENVIRONMENT_ID })
+    )
   })
 
   it('does not let a slow browser create replace a newer browser selection', async () => {

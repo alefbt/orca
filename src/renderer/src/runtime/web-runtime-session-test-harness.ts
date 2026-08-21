@@ -30,6 +30,83 @@ export type WebRuntimeSessionMocks = {
   hasMaterializedWebRuntimeBrowserPage: SessionMock
 }
 
+/**
+ * Store actions the optimistic browser stage drives, owned here rather than by each test file's
+ * hoisted mock object so every browser-create suite models staging the same way.
+ */
+export const stagedBrowserTabMocks = {
+  closeBrowserTab: vi.fn(),
+  removeRemoteBrowserPageHandle: vi.fn()
+}
+
+type HarnessBrowserWorkspace = {
+  id: string
+  worktreeId: string
+  activePageId: string
+  pageIds: string[]
+}
+
+type HarnessBrowserState = {
+  browserPagesByWorkspace: Record<string, { id: string; workspaceId: string; url: string }[]>
+  browserTabsByWorktree: Record<string, HarnessBrowserWorkspace[]>
+  remoteBrowserPageHandlesByPageId: Record<string, { staged?: true; [key: string]: unknown }>
+}
+
+let stagedWorkspaceCounter = 0
+
+/** The staged browser workspaces currently held by the harness store, in creation order. */
+export function stagedBrowserWorkspaces(
+  mocks: WebRuntimeSessionMocks
+): { workspaceId: string; pageId: string; staged: boolean }[] {
+  const state = mocks.getState() as HarnessBrowserState
+  return Object.values(state.browserTabsByWorktree)
+    .flat()
+    .map((workspace) => ({
+      workspaceId: workspace.id,
+      pageId: workspace.activePageId,
+      staged: state.remoteBrowserPageHandlesByPageId[workspace.activePageId]?.staged === true
+    }))
+}
+
+function stubStagedBrowserTabStore(mocks: WebRuntimeSessionMocks): void {
+  const readState = (): HarnessBrowserState => mocks.getState() as HarnessBrowserState
+  mocks.createBrowserTab.mockImplementation(
+    (worktreeId: string, url: string, options?: { browserPageId?: string }) => {
+      stagedWorkspaceCounter += 1
+      const state = readState()
+      const workspaceId = `staged-workspace-${stagedWorkspaceCounter}`
+      const pageId = options?.browserPageId ?? `staged-page-${stagedWorkspaceCounter}`
+      const workspace = { id: workspaceId, worktreeId, activePageId: pageId, pageIds: [pageId] }
+      state.browserPagesByWorkspace[workspaceId] = [{ id: pageId, workspaceId, url }]
+      state.browserTabsByWorktree[worktreeId] = [
+        ...(state.browserTabsByWorktree[worktreeId] ?? []),
+        workspace
+      ]
+      return workspace
+    }
+  )
+  mocks.setRemoteBrowserPageHandle.mockImplementation(
+    (pageId: string, handle: Record<string, unknown>) => {
+      readState().remoteBrowserPageHandlesByPageId[pageId] = handle
+    }
+  )
+  stagedBrowserTabMocks.removeRemoteBrowserPageHandle.mockImplementation((pageId: string) => {
+    const state = readState()
+    const handle = state.remoteBrowserPageHandlesByPageId[pageId] ?? null
+    delete state.remoteBrowserPageHandlesByPageId[pageId]
+    return handle
+  })
+  stagedBrowserTabMocks.closeBrowserTab.mockImplementation((workspaceId: string) => {
+    const state = readState()
+    delete state.browserPagesByWorkspace[workspaceId]
+    for (const [worktreeId, workspaces] of Object.entries(state.browserTabsByWorktree)) {
+      state.browserTabsByWorktree[worktreeId] = workspaces.filter(
+        (workspace) => workspace.id !== workspaceId
+      )
+    }
+  })
+}
+
 export function makeSnapshot(): RuntimeMobileSessionTabsResult {
   return {
     worktree: WORKTREE_ID,
@@ -57,6 +134,7 @@ export function stubBrowserTabCreateEnvironment(mocks: WebRuntimeSessionMocks): 
     activeTabTypeByWorktree: { [WORKTREE_ID]: 'editor' },
     activeFileIdByWorktree: { [WORKTREE_ID]: '/worktree/index.html' },
     browserPagesByWorkspace: {},
+    browserTabsByWorktree: {},
     remoteBrowserPageHandlesByPageId: {},
     unifiedTabsByWorktree: {
       [WORKTREE_ID]: [
@@ -68,9 +146,11 @@ export function stubBrowserTabCreateEnvironment(mocks: WebRuntimeSessionMocks): 
       ]
     },
     createBrowserTab: mocks.createBrowserTab,
+    closeBrowserTab: stagedBrowserTabMocks.closeBrowserTab,
     closeEmptyGroup: mocks.closeEmptyGroup,
     moveUnifiedTabToGroup: mocks.moveUnifiedTabToGroup,
     setRemoteBrowserPageHandle: mocks.setRemoteBrowserPageHandle,
+    removeRemoteBrowserPageHandle: stagedBrowserTabMocks.removeRemoteBrowserPageHandle,
     focusBrowserTabInWorktree: mocks.focusBrowserTabInWorktree,
     setActiveWorktree: mocks.setActiveWorktree
   })
@@ -81,11 +161,7 @@ export function stubBrowserTabCreateEnvironment(mocks: WebRuntimeSessionMocks): 
     })
   })
   mocks.subscribe.mockReturnValue(vi.fn())
-  mocks.createBrowserTab.mockReturnValue({
-    id: 'local-browser-workspace-1',
-    activePageId: 'local-page-1',
-    pageIds: ['local-page-1']
-  })
+  stubStagedBrowserTabStore(mocks)
   mocks.moveUnifiedTabToGroup.mockReturnValue(true)
   mocks.applyFreshWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
   mocks.resolveHostSessionTabIdForWebSessionTab.mockReturnValue(null)
@@ -94,6 +170,7 @@ export function stubBrowserTabCreateEnvironment(mocks: WebRuntimeSessionMocks): 
 }
 
 export function resetBrowserTabCreateEnvironment(): void {
+  stagedWorkspaceCounter = 0
   vi.unstubAllGlobals()
   clearRuntimeCompatibilityCacheForTests()
   resetWebSessionBrowserPlacementsForTests()

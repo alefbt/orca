@@ -2647,6 +2647,15 @@ function applyWebSessionTabsSnapshotWithContext(
         if (!browserWorkspaceHasRemoteEnvironmentPage(state, tab, environmentId)) {
           return false
         }
+        // Why: a staged tab holds a handle before its create RPC answers, so its absence from
+        // this snapshot is expected — culling it would erase the optimistic tab mid-create.
+        if (
+          (state.browserPagesByWorkspace[tab.id] ?? []).some(
+            (page) => state.remoteBrowserPageHandlesByPageId[page.id]?.staged === true
+          )
+        ) {
+          return false
+        }
         return !(state.browserPagesByWorkspace[tab.id] ?? []).some((page) => {
           const handle = state.remoteBrowserPageHandlesByPageId[page.id]
           return (
@@ -3234,6 +3243,9 @@ function applyWebSessionTabsSnapshotWithContext(
     if (
       currentHandle?.environmentId !== environmentId ||
       currentHandle.remotePageId !== remotePageId ||
+      // Why: this snapshot is the host publishing the page, which is exactly what clears a
+      // staged handle — without this the optimistic flag would survive every later snapshot.
+      currentHandle.staged === true ||
       !optionalRuntimeBrowserPlacementsEqual(currentHandle.placement, placement)
     ) {
       nextRemoteBrowserPageHandlesByPageId =

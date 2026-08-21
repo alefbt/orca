@@ -97,6 +97,12 @@ import { assertRuntimeManagedBrowserCreationAvailable } from '../lib/client-crea
 import { hasMaterializedWebRuntimeBrowserPage } from './web-runtime-browser-materialization'
 import { waitForWebRuntimeBrowserPageMaterialization } from './web-runtime-browser-materialization-wait'
 import {
+  discardStagedWebRuntimeBrowserTab,
+  rehomeStagedWebRuntimeBrowserTab,
+  stageWebRuntimeBrowserTab,
+  type StagedWebRuntimeBrowserTab
+} from './web-runtime-browser-tab-staging'
+import {
   pauseAfterE2eWebRuntimeBrowserCreate,
   throwIfE2eWebRuntimeBrowserCapabilityUnavailable,
   throwIfE2eWebRuntimeBrowserReconciliationFails
@@ -583,9 +589,39 @@ export async function createWebRuntimeSessionBrowserTab(args: {
   let guardedPageId = provisionalPageId
   let createdPageId: string | null = null
   let createAttempted = false
+  let staged: StagedWebRuntimeBrowserTab | null = null
   try {
     throwIfE2eWebRuntimeBrowserCapabilityUnavailable()
     assertRuntimeManagedBrowserCreationAvailable(useAppStore.getState(), environmentId)
+    if (args.clientTargetGroupId) {
+      recordWebSessionBrowserPlacement({
+        environmentId,
+        worktreeId: args.worktreeId,
+        remotePageId: provisionalPageId,
+        groupId: args.clientTargetGroupId,
+        callerCreatedGroup: args.clientTargetGroupCreated
+      })
+    }
+    if (shouldSelectWorktree) {
+      selectWebRuntimeSessionBrowserWorktree(args.worktreeId, environmentId)
+    }
+    // Why: everything below this point is a host round-trip; stage the tab first so the strip
+    // reacts to the click instead of to the runtime.
+    staged = stageWebRuntimeBrowserTab({
+      environmentId,
+      worktreeId: args.worktreeId,
+      remotePageId: provisionalPageId,
+      activate: shouldFocusOnCreate,
+      ...(args.url !== undefined ? { url: args.url } : {}),
+      ...(args.stagedTitle !== undefined ? { title: args.stagedTitle } : {}),
+      ...(args.profileId !== undefined ? { profileId: args.profileId } : {}),
+      ...(args.clientTargetGroupId ?? args.targetGroupId
+        ? { targetGroupId: (args.clientTargetGroupId ?? args.targetGroupId) as string }
+        : {}),
+      ...(args.stagedFocusAddressBar !== undefined
+        ? { focusAddressBar: args.stagedFocusAddressBar }
+        : {})
+    })
     const placementPreference = args.placementPreference ?? 'auto'
     let placement: BrowserPageCreationPlacement = { kind: 'server' }
     if (placementPreference !== 'server' && hostAdvertisesClientHosting) {
@@ -605,18 +641,6 @@ export async function createWebRuntimeSessionBrowserTab(args: {
           { cause: error }
         )
       }
-    }
-    if (args.clientTargetGroupId) {
-      recordWebSessionBrowserPlacement({
-        environmentId,
-        worktreeId: args.worktreeId,
-        remotePageId: provisionalPageId,
-        groupId: args.clientTargetGroupId,
-        callerCreatedGroup: args.clientTargetGroupCreated
-      })
-    }
-    if (shouldSelectWorktree) {
-      selectWebRuntimeSessionBrowserWorktree(args.worktreeId, environmentId)
     }
     const initialFocusState = shouldFocusOnCreate ? useAppStore.getState() : null
     const expectedActiveWorktreeId = initialFocusState?.activeWorktreeId
@@ -708,6 +732,13 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         fromRemotePageId: provisionalPageId,
         toRemotePageId: created.browserPageId
       })
+      if (staged) {
+        staged = rehomeStagedWebRuntimeBrowserTab(staged, {
+          environmentId,
+          worktreeId: args.worktreeId,
+          remotePageId: created.browserPageId
+        })
+      }
       const focusIntent = shouldFocusOnCreate
         ? peekWebSessionFocusIntent(intentOwner, args.worktreeId)
         : null
@@ -777,6 +808,9 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     if (!materialized) {
       throw new Error('The created browser tab did not materialize in the client.')
     }
+    // Why: materialization means the snapshot has taken ownership of these rows, so nothing
+    // downstream may still unwind them as an optimistic stage.
+    staged = null
     const remainingFocusIntent = shouldFocusOnCreate
       ? peekWebSessionFocusIntent(intentOwner, args.worktreeId)
       : null
@@ -801,6 +835,11 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     return true
   } catch (error) {
     unsubscribeFocusGuard()
+    // Why: unwind the optimistic tab before the cleanup round-trips below, so a failed create
+    // does not leave a dead tab sitting in the strip for the length of browser.tabClose.
+    if (staged) {
+      discardStagedWebRuntimeBrowserTab(staged)
+    }
     let recoveryError: unknown = null
     const createFailureDefinitive = isDefinitiveBrowserCreateFailure(error)
     const cleanupPageId =

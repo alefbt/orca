@@ -152,8 +152,13 @@ export function RemoteBrowserPagePane({
   // down every input RPC fails as a matter of course, and those failures must not overwrite the
   // message that explains why — nor can the reconnect control depend on one of them being present.
   // A stopped stream delivers no frames that could clear paneBusy, so it must force busy off.
+  // A staged page has no stream to report on yet; its create is the thing still in progress.
   const busy =
-    streamStatus.kind === 'stopped' ? false : paneBusy || isRemoteBrowserStreamBusy(streamStatus)
+    remotePageHandle?.staged === true
+      ? true
+      : streamStatus.kind === 'stopped'
+        ? false
+        : paneBusy || isRemoteBrowserStreamBusy(streamStatus)
   const streamNotice = remoteBrowserStreamNotice(streamStatus)
   const remoteError =
     paneNotice?.kind === 'direct' ? paneNotice.text : (streamNotice ?? paneNotice?.text ?? null)
@@ -212,6 +217,7 @@ export function RemoteBrowserPagePane({
     browserPageId: browserTab.id,
     isActive,
     lifecycle,
+    stagedPage: remotePageHandle?.staged === true,
     runtimeWorktree,
     runtimeTarget,
     remoteViewportRef,

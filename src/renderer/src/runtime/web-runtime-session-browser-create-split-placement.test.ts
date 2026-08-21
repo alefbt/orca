@@ -9,6 +9,7 @@ import {
   WORKTREE_ID,
   makeSnapshot,
   resetBrowserTabCreateEnvironment,
+  stagedBrowserWorkspaces,
   stubBrowserTabCreateEnvironment
 } from './web-runtime-session-test-harness'
 
@@ -94,6 +95,7 @@ describe('createWebRuntimeSessionBrowserTab', () => {
           remotePageId: 'remote-browser-page-1'
         }
       },
+      browserTabsByWorktree: {},
       unifiedTabsByWorktree: { [WORKTREE_ID]: [] },
       createBrowserTab: mocks.createBrowserTab,
       closeEmptyGroup: mocks.closeEmptyGroup,
@@ -145,7 +147,16 @@ describe('createWebRuntimeSessionBrowserTab', () => {
         groupId: 'client-preview-group'
       })
     ).toBe(false)
-    expect(mocks.createBrowserTab).not.toHaveBeenCalled()
+    // The optimistic tab is staged into the requested split, not the active group.
+    expect(mocks.createBrowserTab).toHaveBeenCalledWith(
+      WORKTREE_ID,
+      'about:blank',
+      expect.objectContaining({
+        activate: false,
+        browserRuntimeEnvironmentId: ENVIRONMENT_ID,
+        targetGroupId: 'client-preview-group'
+      })
+    )
     expect(mocks.closeEmptyGroup).not.toHaveBeenCalled()
   })
 
@@ -213,7 +224,7 @@ describe('createWebRuntimeSessionBrowserTab', () => {
       },
       timeoutMs: 15_000
     })
-    expect(mocks.createBrowserTab).not.toHaveBeenCalled()
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([])
     expect(mocks.closeEmptyGroup).toHaveBeenCalledWith(WORKTREE_ID, 'client-preview-group')
     expect(
       isWebSessionBrowserPlacementGroupReserved({
