@@ -533,6 +533,18 @@ function isRuntimeEnvironmentActive(): boolean {
   return Boolean(useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim())
 }
 
+/**
+ * A client-hosted page is a local Electron webview on this desktop that happens to belong to a
+ * remote runtime. Its guest events come from this main process, not from the host's tab sync, so
+ * the blanket runtime-active guard on those channels would drop them on the floor.
+ */
+function isClientHostedBrowserPage(browserPageId: string): boolean {
+  return (
+    useAppStore.getState().remoteBrowserPageHandlesByPageId[browserPageId]?.placement?.kind ===
+    'client'
+  )
+}
+
 /** Remount panes that parked with no PTY while their owning host was unknown. */
 function remountTerminalTabsAwaitingHostHydration(): void {
   const store = useAppStore.getState()
@@ -2216,7 +2228,7 @@ export function useIpcEvents(): void {
 
     const unsubscribeCertificateFailure = window.api.browser.onCertificateFailureChanged?.(
       ({ browserPageId, failure }) => {
-        if (isRuntimeEnvironmentActive()) {
+        if (isRuntimeEnvironmentActive() && !isClientHostedBrowserPage(browserPageId)) {
           return
         }
         useAppStore.getState().setBrowserPageCertificateFailure(browserPageId, failure)

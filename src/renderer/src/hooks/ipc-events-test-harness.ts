@@ -126,6 +126,7 @@ export type IpcEventsHarness = {
   jumpToWorktreeIndex: (index: number) => void
   jumpToTabIndex: (index: number) => void
   navigationUpdate: (event: { browserPageId: string; url: string; title: string }) => void
+  certificateFailureChanged: (event: { browserPageId: string; failure: unknown }) => void
   /** Standard (non-palette) target of a workspace digit chord. */
   activateAndRevealWorkspace: ReturnType<typeof vi.fn>
 }
@@ -150,6 +151,9 @@ export async function loadIpcEventsHarness(
   let requestTerminalCreateListener: ((request: RequestTerminalCreateRequest) => void) | null = null
   let navigationUpdateListener:
     | ((event: { browserPageId: string; url: string; title: string }) => void)
+    | null = null
+  let certificateFailureListener:
+    | ((event: { browserPageId: string; failure: unknown }) => void)
     | null = null
   const indexJumpListeners = new Map<string, (index: number) => void>()
 
@@ -257,6 +261,12 @@ export async function loadIpcEventsHarness(
           ) => {
             navigationUpdateListener = listener
             return () => {}
+          },
+          onCertificateFailureChanged: (
+            listener: (event: { browserPageId: string; failure: unknown }) => void
+          ) => {
+            certificateFailureListener = listener
+            return () => {}
           }
         }),
         mobile: createApiNamespaceStub({
@@ -291,6 +301,12 @@ export async function loadIpcEventsHarness(
         throw new Error('Expected the browser navigation listener to be registered')
       }
       navigationUpdateListener(event)
+    },
+    certificateFailureChanged: (event) => {
+      if (typeof certificateFailureListener !== 'function') {
+        throw new Error('Expected the browser certificate-failure listener to be registered')
+      }
+      certificateFailureListener(event)
     },
     activateAndRevealWorkspace
   }
