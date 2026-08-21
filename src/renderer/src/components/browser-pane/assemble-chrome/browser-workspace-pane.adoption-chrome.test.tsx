@@ -486,7 +486,9 @@ describe.each([
     expect(screen.queryByText('Example docs')).toBeNull()
   })
 
-  it('carries a live edit through a host restart that rekeys the client-hosted pane', () => {
+  // The pane is no longer keyed on the generation, so a bump re-runs the attach rather than
+  // remounting — but the edit has to survive either way.
+  it('carries a live edit through a host restart that bumps the page generation', () => {
     renderWorkspacePane()
     act(() => adoptOntoClient())
     act(() => flushFrames())
