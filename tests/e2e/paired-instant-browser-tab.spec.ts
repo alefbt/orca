@@ -128,6 +128,117 @@ async function readBrowserTabTransitions(
   )
 }
 
+/** What the address bar in the visible browser pane holds right now. */
+async function readAddressBarState(
+  page: Awaited<ReturnType<typeof setUpPairedFixture>>['client']['page']
+): Promise<{ bars: number; focused: boolean; value: string | null }> {
+  return page.evaluate(() => {
+    const bars = document.querySelectorAll('[data-orca-browser-address-bar]')
+    const input = bars[0] as HTMLInputElement | undefined
+    return {
+      bars: bars.length,
+      focused: input !== undefined && document.activeElement === input,
+      value: input?.value ?? null
+    }
+  })
+}
+
+async function readActiveBrowserPlacementKind(
+  page: Awaited<ReturnType<typeof setUpPairedFixture>>['client']['page'],
+  worktreeId: string
+): Promise<string | null> {
+  return page.evaluate((id) => {
+    const state = window.__store?.getState()
+    for (const workspace of state?.browserTabsByWorktree[id] ?? []) {
+      for (const browserPage of state?.browserPagesByWorkspace[workspace.id] ?? []) {
+        const handle = state?.remoteBrowserPageHandlesByPageId[browserPage.id]
+        return handle?.staged === true ? 'staged' : (handle?.placement?.kind ?? 'server')
+      }
+    }
+    return null
+  }, worktreeId)
+}
+
+// Why: the optimistic tab autofocuses its address bar, so the user starts typing a URL a full host
+// round-trip before adoption lands. Adoption replaces the whole pane, and with it the bar — so
+// unless the edit is carried across, their typed address is silently reset to about:blank.
+test('keeps an address typed into the staged tab when the paired create is adopted', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+
+    await client.page.evaluate(() => {
+      const fault = (window as FaultWindow).__webRuntimeBrowserCreationFault
+      if (!fault) {
+        throw new Error('Browser creation E2E fault seam unavailable')
+      }
+      fault.arm()
+    })
+    await client.page.evaluate(
+      ({ groupId, url }) => {
+        const state = window.__store?.getState()
+        if (!state) {
+          throw new Error('Paired client store unavailable')
+        }
+        state.setBrowserDefaultUrl(url)
+        const create = state.openNewBrowserTabInActiveWorkspace(groupId).catch(() => undefined)
+        ;(window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate = create
+      },
+      { groupId: rootGroupId, url: fixture.url }
+    )
+
+    await client.page.locator('[data-orca-browser-address-bar]').first().waitFor()
+    await expect
+      .poll(() => readActiveBrowserPlacementKind(client.page, worktreeId), {
+        timeout: 60_000,
+        message: 'paired client never staged the optimistic browser tab'
+      })
+      .toBe('staged')
+    await expect
+      .poll(
+        () =>
+          client.page.evaluate(
+            () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.snapshot() ?? null
+          ),
+        { timeout: 60_000, message: 'held browser create never reached the fault seam' }
+      )
+      .toMatchObject({ armed: true, createdPageId: expect.any(String) })
+
+    // The user types their address while the create is still held at the seam.
+    const typed = 'example.internal/typed-before-adoption'
+    const addressBar = client.page.locator('[data-orca-browser-address-bar]').first()
+    await addressBar.click()
+    await client.page.keyboard.type(typed)
+    expect(await readAddressBarState(client.page)).toMatchObject({ focused: true, value: typed })
+
+    // Why reset and not release: release arms a reconciliation failure, which rolls the tab back.
+    // Adoption is the thing under test, so the create has to be allowed to succeed.
+    await client.page.evaluate(() =>
+      (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
+    )
+    await client.page.evaluate(
+      () => (window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate
+    )
+    await expect
+      .poll(() => readActiveBrowserPlacementKind(client.page, worktreeId), {
+        timeout: 90_000,
+        message: 'the held create never adopted its staged tab'
+      })
+      .toBe('client')
+
+    // Why a settle window rather than an immediate read: the failure this guards is the adopted
+    // pane's own mount overwriting the bar a frame or two after the swap, which a read taken the
+    // instant the handle flips would miss.
+    await client.page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 2_000)))
+    expect(await readAddressBarState(client.page)).toEqual({ bars: 1, focused: true, value: typed })
+  } finally {
+    await fixture.dispose()
+  }
+})
+
 test('shows a paired browser tab before its create RPC resolves, then keeps it as one tab', async ({
   testRepoPath
 }, testInfo) => {
