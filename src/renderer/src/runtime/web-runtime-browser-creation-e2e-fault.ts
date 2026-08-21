@@ -5,12 +5,16 @@ type BrowserCreationFaultSnapshot = {
   armed: boolean
   capabilityRejectionArmed: boolean
   createdPageId: string | null
+  preparationArmed: boolean
+  preparationReached: boolean
   suppressedPageIds: string[]
 }
 
 type BrowserCreationFaultApi = {
   arm: () => void
   armCapabilityRejection: () => void
+  armPreparation: () => void
+  releasePreparation: () => boolean
   release: () => boolean
   reset: () => void
   snapshot: () => BrowserCreationFaultSnapshot
@@ -26,11 +30,20 @@ let createdPageId: string | null = null
 let failNextReconciliation = false
 let releaseCreatedPage: (() => void) | null = null
 let createdPageBarrier: Promise<void> | null = null
+let preparationArmed = false
+let preparationReached = false
+let releasePreparationBarrier: (() => void) | null = null
+let preparationBarrier: Promise<void> | null = null
 const suppressedPageIds = new Set<string>()
 const MAX_SUPPRESSED_PAGE_IDS = 128
 
 function resetFault(): void {
   releaseCreatedPage?.()
+  releasePreparationBarrier?.()
+  preparationArmed = false
+  preparationReached = false
+  releasePreparationBarrier = null
+  preparationBarrier = null
   armed = false
   capabilityRejectionArmed = false
   createdPageId = null
@@ -57,6 +70,25 @@ function exposeFaultApi(): void {
       resetFault()
       capabilityRejectionArmed = true
     },
+    // Why its own barrier: the client-host preparation runs before the create RPC, and it is a
+    // separate remote round-trip. Holding only the post-create barrier leaves that whole window
+    // untestable, and it is the window where a user action races an unguarded create.
+    armPreparation: () => {
+      resetFault()
+      preparationArmed = true
+      preparationBarrier = new Promise<void>((resolve) => {
+        releasePreparationBarrier = resolve
+      })
+    },
+    releasePreparation: () => {
+      if (!preparationArmed || !releasePreparationBarrier) {
+        return false
+      }
+      const release = releasePreparationBarrier
+      releasePreparationBarrier = null
+      release()
+      return true
+    },
     release: () => {
       if (!armed || !createdPageId || !releaseCreatedPage) {
         return false
@@ -72,6 +104,8 @@ function exposeFaultApi(): void {
       armed,
       capabilityRejectionArmed,
       createdPageId,
+      preparationArmed,
+      preparationReached,
       suppressedPageIds: [...suppressedPageIds]
     })
   }
@@ -93,6 +127,14 @@ export async function pauseAfterE2eWebRuntimeBrowserCreate(remotePageId: string)
   }
   createdPageId = remotePageId
   await createdPageBarrier
+}
+
+export async function pauseDuringE2eWebRuntimeBrowserClientHostPreparation(): Promise<void> {
+  if (!e2eConfig.exposeStore || !preparationArmed || !preparationBarrier) {
+    return
+  }
+  preparationReached = true
+  await preparationBarrier
 }
 
 export function throwIfE2eWebRuntimeBrowserReconciliationFails(): void {

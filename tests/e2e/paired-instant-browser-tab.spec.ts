@@ -10,9 +10,11 @@ import {
 type FaultWindow = Window & {
   __webRuntimeBrowserCreationFault?: {
     arm: () => void
+    armPreparation: () => void
     release: () => boolean
+    releasePreparation: () => boolean
     reset: () => void
-    snapshot: () => { armed: boolean; createdPageId: string | null }
+    snapshot: () => { armed: boolean; createdPageId: string | null; preparationReached: boolean }
   }
 }
 
@@ -659,6 +661,248 @@ test('leaves the user on an empty worktree when its first browser create fails',
     await client.page.evaluate(() =>
       (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
     )
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+/** Arm the create seam and start a create that will hold, staged, until the seam is reset. */
+async function startHeldCreate(
+  fixture: Awaited<ReturnType<typeof setUpPairedFixture>>,
+  groupId: string
+): Promise<void> {
+  const { client, worktreeId } = fixture
+  await client.page.evaluate(() => {
+    const fault = (window as FaultWindow).__webRuntimeBrowserCreationFault
+    if (!fault) {
+      throw new Error('Browser creation E2E fault seam unavailable')
+    }
+    fault.arm()
+  })
+  await client.page.evaluate(
+    ({ groupId, url }) => {
+      const state = window.__store?.getState()
+      if (!state) {
+        throw new Error('Paired client store unavailable')
+      }
+      state.setBrowserDefaultUrl(url)
+      const create = state.openNewBrowserTabInActiveWorkspace(groupId).catch(() => undefined)
+      ;(window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate = create
+    },
+    { groupId, url: fixture.url }
+  )
+  await expect
+    .poll(() => readActiveBrowserPlacementKind(client.page, worktreeId), {
+      timeout: 60_000,
+      message: 'paired client never staged the optimistic browser tab'
+    })
+    .toBe('staged')
+  await expect
+    .poll(
+      () =>
+        client.page.evaluate(
+          () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.snapshot() ?? null
+        ),
+      { timeout: 60_000, message: 'held browser create never reached the fault seam' }
+    )
+    .toMatchObject({ armed: true, createdPageId: expect.any(String) })
+}
+
+/** Release the seam without arming a reconciliation failure, then wait for adoption. */
+async function releaseHeldCreateAndAdopt(
+  fixture: Awaited<ReturnType<typeof setUpPairedFixture>>
+): Promise<void> {
+  const { client, worktreeId } = fixture
+  await client.page.evaluate(() =>
+    (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
+  )
+  await client.page.evaluate(
+    () => (window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate
+  )
+  await expect
+    .poll(() => readActiveBrowserPlacementKind(client.page, worktreeId), {
+      timeout: 90_000,
+      message: 'the held create never adopted its staged tab'
+    })
+    .toBe('client')
+  // Why a settle window: the failures here are a snapshot arriving a beat after the handle flips,
+  // so a read taken the instant adoption lands would miss every one of them.
+  await client.page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 3_000)))
+}
+
+/** The browser tab's unified id, whichever group it currently sits in. */
+async function readBrowserTabId(
+  page: Awaited<ReturnType<typeof setUpPairedFixture>>['client']['page'],
+  worktreeId: string
+): Promise<string | null> {
+  return page.evaluate(
+    (id) =>
+      (window.__store?.getState().unifiedTabsByWorktree[id] ?? []).find(
+        (tab) => tab.contentType === 'browser'
+      )?.id ?? null,
+    worktreeId
+  )
+}
+
+// Why: the create records the group it asked for, and that record used to outrank the group the
+// tab was actually in when the snapshot landed — so a split made during the staging window was
+// undone, taking the pane with it.
+test('keeps a split made while the paired create is still staged', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+    await startHeldCreate(fixture, rootGroupId)
+
+    // The user drags the staged tab out into a new pane while the create is still held.
+    const stagedTabId = await readBrowserTabId(client.page, worktreeId)
+    expect(stagedTabId).not.toBeNull()
+    await client.page.evaluate(
+      ({ groupId, tabId }) =>
+        window.__store?.getState().dropUnifiedTab(tabId, { groupId, splitDirection: 'right' }),
+      { groupId: rootGroupId, tabId: stagedTabId as string }
+    )
+    const split = await readPanes(client.page, worktreeId)
+    const splitGroupId = split.groups.find((group) => group.tabOrder.includes(stagedTabId as string))
+      ?.id
+    expect(splitGroupId).toBeDefined()
+    expect(splitGroupId).not.toBe(rootGroupId)
+    expect(split.layoutGroupIds).toContain(splitGroupId)
+
+    await releaseHeldCreateAndAdopt(fixture)
+
+    const adopted = await readPanes(client.page, worktreeId)
+    const adoptedTabId = await readBrowserTabId(client.page, worktreeId)
+    expect(requireGroup(adopted, splitGroupId as string).tabOrder).toContain(adoptedTabId)
+    expect(adopted.layoutGroupIds).toContain(splitGroupId)
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+// Why the hold is on the preparation and not the create: the focus expectation used to be
+// sampled after that round-trip, so a switch made during it was baked in as the baseline and the
+// guard read the user as having stayed put. A switch after the create RPC was always handled.
+test('leaves the user on the tab they switched to during client-host preparation', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+    const before = requireGroup(await readPanes(client.page, worktreeId), rootGroupId)
+    const otherTabId = before.tabOrder[0]
+    expect(otherTabId).toBeDefined()
+
+    await client.page.evaluate(() => {
+      const fault = (window as FaultWindow).__webRuntimeBrowserCreationFault
+      if (!fault) {
+        throw new Error('Browser creation E2E fault seam unavailable')
+      }
+      fault.armPreparation()
+    })
+    await client.page.evaluate(
+      ({ groupId, url }) => {
+        const state = window.__store?.getState()
+        if (!state) {
+          throw new Error('Paired client store unavailable')
+        }
+        state.setBrowserDefaultUrl(url)
+        const create = state.openNewBrowserTabInActiveWorkspace(groupId).catch(() => undefined)
+        ;(window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate = create
+      },
+      { groupId: rootGroupId, url: fixture.url }
+    )
+    await expect
+      .poll(
+        () =>
+          client.page.evaluate(
+            () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.snapshot() ?? null
+          ),
+        { timeout: 60_000, message: 'the create never reached the client-host preparation seam' }
+      )
+      .toMatchObject({ preparationReached: true })
+    // Staging already happened and activated the new tab, so this is a real move away from it.
+    await expect
+      .poll(() => readActiveBrowserPlacementKind(client.page, worktreeId), {
+        timeout: 60_000,
+        message: 'paired client never staged the optimistic browser tab'
+      })
+      .toBe('staged')
+    expect(requireGroup(await readPanes(client.page, worktreeId), rootGroupId).activeTabId).not.toBe(
+      otherTabId
+    )
+
+    // The user clicks back to their terminal while the desktop host is still being prepared.
+    await client.page.evaluate(
+      (tabId) => window.__store?.getState().activateTab(tabId),
+      otherTabId as string
+    )
+    expect(requireGroup(await readPanes(client.page, worktreeId), rootGroupId).activeTabId).toBe(
+      otherTabId
+    )
+
+    await client.page.evaluate(() =>
+      (window as FaultWindow).__webRuntimeBrowserCreationFault?.releasePreparation()
+    )
+    await client.page.evaluate(
+      () => (window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate
+    )
+    await expect
+      .poll(() => readActiveBrowserPlacementKind(client.page, worktreeId), {
+        timeout: 90_000,
+        message: 'the create never adopted its staged tab'
+      })
+      .toBe('client')
+    await client.page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 3_000)))
+
+    const adopted = await readPanes(client.page, worktreeId)
+    expect(requireGroup(adopted, rootGroupId).activeTabId).toBe(otherTabId)
+    expect(adopted.activeGroupId).toBe(rootGroupId)
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+// Why element identity and not the bar's contents: a save-and-resume across a remount restores the
+// text, which is what the typed-address test already proves. Only the same input node proves the
+// chrome was never torn down — a teardown is what replays the suggestion dropdown's open animation
+// and drops the guest the user is looking at.
+test('adopts a paired browser tab without rebuilding its chrome', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+    await startHeldCreate(fixture, rootGroupId)
+    await client.page.locator('[data-orca-browser-address-bar]').first().waitFor()
+
+    // Mark the live node. A remount builds a new input, which cannot carry this.
+    const marked = await client.page.evaluate(() => {
+      const input = document.querySelector('[data-orca-browser-address-bar]')
+      if (!input) {
+        return false
+      }
+      input.setAttribute('data-e2e-staged-address-bar', 'marked')
+      return true
+    })
+    expect(marked).toBe(true)
+
+    await releaseHeldCreateAndAdopt(fixture)
+
+    expect(
+      await client.page.evaluate(() => ({
+        bars: document.querySelectorAll('[data-orca-browser-address-bar]').length,
+        marked: document.querySelectorAll('[data-e2e-staged-address-bar="marked"]').length,
+        sameNode:
+          document.querySelector('[data-orca-browser-address-bar]') ===
+          document.querySelector('[data-e2e-staged-address-bar="marked"]')
+      }))
+    ).toEqual({ bars: 1, marked: 1, sameNode: true })
+    expect(requireGroup(await readPanes(client.page, worktreeId), rootGroupId)).toBeDefined()
   } finally {
     await fixture.dispose()
   }

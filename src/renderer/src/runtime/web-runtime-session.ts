@@ -107,6 +107,7 @@ import {
 } from './web-runtime-browser-tab-staging'
 import {
   pauseAfterE2eWebRuntimeBrowserCreate,
+  pauseDuringE2eWebRuntimeBrowserClientHostPreparation,
   throwIfE2eWebRuntimeBrowserCapabilityUnavailable,
   throwIfE2eWebRuntimeBrowserReconciliationFails
 } from './web-runtime-browser-creation-e2e-fault'
@@ -685,6 +686,7 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     let placement: BrowserPageCreationPlacement = { kind: 'server' }
     if (placementPreference !== 'server' && hostAdvertisesClientHosting) {
       try {
+        await pauseDuringE2eWebRuntimeBrowserClientHostPreparation()
         placement = await window.api.runtimeEnvironments.prepareBrowserClientHostPlacement({
           selector: environmentId,
           expectedPairingRevision: intentOwner.pairingRevision,
