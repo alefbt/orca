@@ -124,7 +124,7 @@ export default function BrowserPane({
         />
       ) : (
         <RemoteBrowserPagePane
-          key={`${activeBrowserRuntimeEnvironmentId ?? ''}:${activeBrowserPage.id}`}
+          key={`${activeBrowserRuntimeEnvironmentId}:${activeBrowserPage.id}`}
           browserTab={activeBrowserPage}
           workspaceId={browserTab.id}
           runtimeEnvironmentId={activeBrowserRuntimeEnvironmentId}

@@ -507,6 +507,10 @@ describe.each([
     act(() => flushFrames())
 
     const after = addressBar()
+    // Why identity and not just the draft: the edit-session registry rescues value, focus and
+    // caret straight back through a remount, so those three assertions pass whether or not the
+    // pane was rebuilt — they cannot see the thing this test is named for.
+    expect(after).toBe(before)
     expect(after.value).toBe('rebooting.internal')
     expect(document.activeElement).toBe(after)
     expect([after.selectionStart, after.selectionEnd]).toEqual([4, 4])
@@ -597,9 +601,34 @@ describe.each([
     // The host retired the old guest with the generation it belonged to; a pane still holding it
     // renders a dead webview that no longer answers.
     expect(attachedGenerations()).toContain(CLIENT_PLACEMENT.pageHostGeneration + 1)
-    expect(stale.detach).toHaveBeenCalled()
+    // Ordering is load-bearing, not incidental: the visible-attachment claim throws
+    // visible_page_claimed if a second attach lands while the first still holds the page, and the
+    // pane would strand itself on the unavailable notice.
+    expect(stale.detach.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.attach.mock.invocationCallOrder.at(-1) as number
+    )
     // ...without rebuilding the chrome around it, which is what the key change bought.
     expect(addressBar()).toBe(bar)
+  })
+
+  // Why the tour is gated on a real placement: recording the interaction is a one-way write that
+  // burns the one-time tour, and a staged pane has no controls that work yet to point at.
+  it('does not burn the intro tour on a pane that is still connecting', () => {
+    const recordFeatureInteraction = vi.fn(async () => {})
+    useAppStore.setState({
+      persistedUIReady: true,
+      contextualToursSeenIds: ['client-hosted-browser'],
+      recordFeatureInteraction
+    } as unknown as Parameters<typeof useAppStore.setState>[0])
+    stageClientHostedHandle()
+    renderWorkspacePane()
+
+    expect(recordFeatureInteraction).not.toHaveBeenCalled()
+
+    act(() => adoptOntoClient())
+    act(() => flushFrames())
+
+    expect(recordFeatureInteraction).toHaveBeenCalledWith('client-hosted-browser')
   })
 
   // Why this path still matters: the staged pane is chosen from a cached runtime status, and a
