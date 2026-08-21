@@ -179,6 +179,23 @@ describe('closing a browser workspace owned by more than one runtime environment
     expect(setActiveWorktree).not.toHaveBeenCalled()
   })
 
+  // Why: the bail above is only correct if it is narrow. Making it unconditional reads the same in
+  // the staged test, so pin the case it must not swallow — a real X on the last real browser tab.
+  it('leaves the worktree when a real close empties it', () => {
+    mocks.isWebRuntimeSessionActive.mockReturnValue(false)
+    const setActiveWorktree = vi.fn()
+    useAppStore.setState({
+      setActiveWorktree,
+      activeWorktreeId: 'worktree-a',
+      reconcileWorktreeTabModel: vi.fn(() => ({ renderableTabCount: 0 }))
+    } as never)
+
+    commands().closeItem('unified-browser')
+
+    expect(closeBrowserTab).toHaveBeenCalledWith('workspace-a', undefined)
+    expect(setActiveWorktree).toHaveBeenCalledWith(null)
+  })
+
   // Why: closeMany runs the plan per item, so a staged tab and a real host-mirrored one in the
   // same bulk close must take different routes — the bulk path is where a shared close policy
   // historically went unasserted.

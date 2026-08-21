@@ -49,6 +49,20 @@ function activeBrowserWorkspace(handle: {
   }
 }
 
+/**
+ * The host's own browser tab, mirrored here with no page of its own. The worktree row names the
+ * runtime, which is the only thing that makes such a mirror closable at all.
+ */
+function pagelessHostMirror(): Record<string, unknown> {
+  return {
+    ...activeBrowserWorkspace({}),
+    browserPagesByWorkspace: {},
+    worktreesByRepo: {
+      'repo-1': [{ id: 'wt-1', repoId: 'repo-1', runtimeOwnerEnvironmentId: 'env-a' }]
+    }
+  }
+}
+
 function requireListener(ref: { current: CloseActiveTabListener | null }): CloseActiveTabListener {
   if (!ref.current) {
     throw new Error('onCloseActiveTab was never registered')
@@ -114,5 +128,58 @@ describe('useIpcEvents Close Tab on the active browser tab', () => {
 
     expect(closeWebRuntimeSessionTab).not.toHaveBeenCalled()
     expect(closeBrowserTab).toHaveBeenCalledWith('workspace-1', { reason: 'cleanup' })
+  })
+
+  // Why: a pageless mirror is the only shape whose visible tab this renderer must remove itself —
+  // the host has no page here to retract it through tab sync. The tab to remove is the unified
+  // tab's own id, not the workspace id it points at.
+  it('removes the mirror tab itself when the host holds no page for it', async () => {
+    const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
+    await useIpcEventsForCloseRouting({
+      closeActiveTabListenerRef: listenerRef,
+      getState: pagelessHostMirror
+    })
+
+    requireListener(listenerRef)()
+
+    expect(closeWebRuntimeSessionTab).toHaveBeenCalledWith({
+      worktreeId: 'wt-1',
+      tabId: 'workspace-1',
+      environmentId: 'env-a',
+      reason: 'user'
+    })
+    expect(closeUnifiedTab).toHaveBeenCalledWith('unified-1')
+    expect(closeBrowserTab).not.toHaveBeenCalled()
+  })
+
+  // Why: with the owning runtime gone there is nobody to close on, and an X that only fans a dead
+  // host close leaves the tab standing.
+  it('tears a host-owned workspace down here when its runtime is disconnected', async () => {
+    isWebRuntimeSessionActive.mockReturnValue(false)
+    const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
+    await useIpcEventsForCloseRouting({
+      closeActiveTabListenerRef: listenerRef,
+      getState: () => activeBrowserWorkspace({ environmentId: 'env-a' })
+    })
+
+    requireListener(listenerRef)()
+
+    expect(closeWebRuntimeSessionTab).not.toHaveBeenCalled()
+    expect(closeBrowserTab).toHaveBeenCalledWith('workspace-1', undefined)
+  })
+
+  it('tears a pageless mirror down here when its runtime is disconnected', async () => {
+    isWebRuntimeSessionActive.mockReturnValue(false)
+    const listenerRef: { current: CloseActiveTabListener | null } = { current: null }
+    await useIpcEventsForCloseRouting({
+      closeActiveTabListenerRef: listenerRef,
+      getState: pagelessHostMirror
+    })
+
+    requireListener(listenerRef)()
+
+    expect(closeWebRuntimeSessionTab).not.toHaveBeenCalled()
+    expect(closeUnifiedTab).not.toHaveBeenCalled()
+    expect(closeBrowserTab).toHaveBeenCalledWith('workspace-1', undefined)
   })
 })
