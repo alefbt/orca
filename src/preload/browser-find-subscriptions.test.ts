@@ -85,11 +85,32 @@ describe('browser Find subscriptions', () => {
     const subscriptions = createBrowserFindSubscriptions()
     const callback = vi.fn()
     const unsubscribe = subscriptions.subscribe(FIRST_SOURCE, callback)
+    expect(subscriptions.subscribedPageCount()).toBe(1)
 
     unsubscribe()
+
     subscriptions.dispatch(FIRST_SOURCE)
     subscriptions.dispatch({ browserPageId: FIRST_SOURCE.browserPageId })
-
     expect(callback).not.toHaveBeenCalled()
+    // Not just silent — the entry is gone, so a long session cannot accumulate empty maps.
+    expect(subscriptions.subscribedPageCount()).toBe(0)
+  })
+
+  // Why: the page entry is shared, so pruning it on one workspace's cleanup would silently
+  // unsubscribe its siblings.
+  it('keeps the other workspaces on a page when one of them unsubscribes', () => {
+    const subscriptions = createBrowserFindSubscriptions()
+    const firstCallback = vi.fn()
+    const samePageCallback = vi.fn()
+    const unsubscribe = subscriptions.subscribe(FIRST_SOURCE, firstCallback)
+    subscriptions.subscribe(SAME_PAGE_SOURCE, samePageCallback)
+
+    unsubscribe()
+    subscriptions.dispatch(SAME_PAGE_SOURCE)
+    subscriptions.dispatch({ browserPageId: FIRST_SOURCE.browserPageId })
+
+    expect(firstCallback).not.toHaveBeenCalled()
+    expect(samePageCallback).toHaveBeenCalledTimes(2)
+    expect(subscriptions.subscribedPageCount()).toBe(1)
   })
 })

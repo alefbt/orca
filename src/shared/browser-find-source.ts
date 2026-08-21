@@ -14,11 +14,6 @@ export type BrowserFindTarget = {
   browserWorkspaceId?: string
 }
 
-export function isBrowserFindSource(value: unknown): value is BrowserFindSource {
-  const target = asBrowserFindTarget(value)
-  return target !== null && typeof target.browserWorkspaceId === 'string'
-}
-
 export function asBrowserFindTarget(value: unknown): BrowserFindTarget | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null
