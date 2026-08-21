@@ -388,7 +388,12 @@ export function ClientHostedBrowserPagePane({
         >
           {zoom.browserZoomPercent}%
         </div>
-        <BrowserFind isOpen={findOpen} onClose={() => setFindOpen(false)} webviewRef={webviewRef} />
+        <BrowserFind
+          isOpen={findOpen}
+          onClose={() => setFindOpen(false)}
+          webviewRef={webviewRef}
+          guestGeneration={pageHostGeneration}
+        />
         {showFailureOverlay && browserTab.loadError ? (
           <BrowserLoadFailureOverlay
             loadError={browserTab.loadError}

@@ -102,3 +102,28 @@ describe('BrowserFind session flags', () => {
     expect(webview.findInPage).toHaveBeenCalledTimes(1)
   })
 })
+
+// Why this case exists now: a client-hosted pane used to be rebuilt when its page generation
+// changed, which took the listener with it. It re-attaches a new guest under the same mount
+// instead, so nothing but the generation tells the find bar its node is dead.
+describe('BrowserFind listener rebinding', () => {
+  it('moves the found-in-page listener onto a guest swapped in under the same mount', () => {
+    const first = createWebviewRef()
+    const { rerender } = render(
+      <BrowserFind isOpen onClose={vi.fn()} webviewRef={first.ref} guestGeneration={1} />
+    )
+    expect(first.ref.current?.addEventListener).toHaveBeenCalledWith(
+      'found-in-page',
+      expect.any(Function)
+    )
+
+    const second = createWebviewRef()
+    first.ref.current = second.ref.current
+    rerender(<BrowserFind isOpen onClose={vi.fn()} webviewRef={first.ref} guestGeneration={2} />)
+
+    expect(second.ref.current?.addEventListener).toHaveBeenCalledWith(
+      'found-in-page',
+      expect.any(Function)
+    )
+  })
+})
