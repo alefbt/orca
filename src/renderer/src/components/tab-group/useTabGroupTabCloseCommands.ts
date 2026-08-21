@@ -9,7 +9,7 @@ import {
 } from '../../runtime/web-runtime-session'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
-import { getBrowserWorkspaceRemoteOwnership } from '@/runtime/remote-browser-tab-ownership'
+import { planBrowserWorkspaceTabClose } from '@/runtime/browser-workspace-tab-close-plan'
 
 export function useTabGroupTabCloseCommands({
   worktreeId,
@@ -85,33 +85,30 @@ export function useTabGroupTabCloseCommands({
       }
       if (item.contentType === 'browser') {
         const browserState = useAppStore.getState()
-        const hasLocalPages = (browserState.browserPagesByWorkspace[item.entityId] ?? []).length > 0
-        const remoteOwnership = getBrowserWorkspaceRemoteOwnership(browserState, item.entityId)
-        if (remoteOwnership.kind === 'ambiguous') {
-          return
-        }
-        const remoteOwnerEnvironmentId =
-          remoteOwnership.kind === 'exact' ? remoteOwnership.environmentId : null
-        const browserRuntimeEnvironmentId = remoteOwnerEnvironmentId ?? runtimeEnvironmentId
-        // Why: host-close a remote-owned browser or a pageless host-mirror (else un-closable); local fallbacks have pages so stay local.
-        const shouldCloseOnHost =
-          isWebRuntimeSessionActive(browserRuntimeEnvironmentId) &&
-          (remoteOwnerEnvironmentId !== null || !hasLocalPages)
-        if (shouldCloseOnHost) {
+        const plan = planBrowserWorkspaceTabClose({
+          state: browserState,
+          workspaceId: item.entityId,
+          focusedEnvironmentId: runtimeEnvironmentId,
+          isEnvironmentActive: isWebRuntimeSessionActive
+        })
+        for (const environmentId of plan.hostEnvironmentIds) {
           void closeWebRuntimeSessionTab({
             worktreeId,
             tabId: item.id,
-            environmentId: browserRuntimeEnvironmentId,
+            environmentId,
             reason: 'user'
           })
-          if (!hasLocalPages) {
-            closeUnifiedTab(item.id)
-          }
+        }
+        if (plan.closesLocally) {
+          destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
+          closeBrowserTab(item.entityId)
+        }
+        if (plan.removesVisibleTab) {
+          closeUnifiedTab(item.id)
+        }
+        if (!plan.closesLocally) {
           return
         }
-        destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
-        closeBrowserTab(item.entityId)
-        closeUnifiedTab(item.id)
       } else if (item.contentType === 'simulator') {
         closeUnifiedTab(item.id)
       } else {
@@ -153,35 +150,29 @@ export function useTabGroupTabCloseCommands({
           continue
         }
         if (item.contentType === 'browser') {
-          // Why: see closeItem — host-close a remote-owned browser or pageless host-mirror; always remove the visible tab.
+          // Why: see closeItem — host-close every owning runtime, or tear down locally.
           const browserState = useAppStore.getState()
-          const hasLocalPages =
-            (browserState.browserPagesByWorkspace[item.entityId] ?? []).length > 0
-          const remoteOwnership = getBrowserWorkspaceRemoteOwnership(browserState, item.entityId)
-          if (remoteOwnership.kind === 'ambiguous') {
-            continue
-          }
-          const remoteOwnerEnvironmentId =
-            remoteOwnership.kind === 'exact' ? remoteOwnership.environmentId : null
-          const browserRuntimeEnvironmentId = remoteOwnerEnvironmentId ?? runtimeEnvironmentId
-          const shouldCloseOnHost =
-            isWebRuntimeSessionActive(browserRuntimeEnvironmentId) &&
-            (remoteOwnerEnvironmentId !== null || !hasLocalPages)
-          if (shouldCloseOnHost) {
+          const plan = planBrowserWorkspaceTabClose({
+            state: browserState,
+            workspaceId: item.entityId,
+            focusedEnvironmentId: runtimeEnvironmentId,
+            isEnvironmentActive: isWebRuntimeSessionActive
+          })
+          for (const environmentId of plan.hostEnvironmentIds) {
             void closeWebRuntimeSessionTab({
               worktreeId,
               tabId: item.id,
-              environmentId: browserRuntimeEnvironmentId,
+              environmentId,
               reason: 'user'
             })
-            if (!hasLocalPages) {
-              closeUnifiedTab(item.id)
-            }
-            continue
           }
-          destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
-          closeBrowserTab(item.entityId)
-          closeUnifiedTab(item.id)
+          if (plan.closesLocally) {
+            destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
+            closeBrowserTab(item.entityId)
+          }
+          if (plan.removesVisibleTab) {
+            closeUnifiedTab(item.id)
+          }
         } else if (item.contentType === 'terminal') {
           closeTab(item.entityId)
         } else if (item.contentType === 'simulator') {

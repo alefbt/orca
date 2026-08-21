@@ -186,7 +186,7 @@ import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner
 import { getResolvedExecutionHostIdForWorktree } from '@/lib/resolved-worktree-execution-host'
 import {
   browserWorkspaceHasRemoteOwner,
-  getBrowserWorkspaceRemoteOwnership
+  getBrowserWorkspaceRemoteOwnerEnvironmentIds
 } from '@/runtime/remote-browser-tab-ownership'
 import {
   combineTerminalWorktreeParkIds,
@@ -1756,24 +1756,22 @@ function Terminal(): React.JSX.Element | null {
       if (isPinnedVisibleTab(state, owningWorktreeId, tabId)) {
         return
       }
-      const remoteOwnership = getBrowserWorkspaceRemoteOwnership(state, tabId)
-      if (remoteOwnership.kind === 'ambiguous') {
-        return
-      }
-      const runtimeEnvironmentId =
-        remoteOwnership.kind === 'exact'
-          ? remoteOwnership.environmentId
-          : getActiveWorktreeRuntimeEnvironmentId(owningWorktreeId)
-      if (
-        isWebRuntimeSessionActive(runtimeEnvironmentId) &&
-        browserWorkspaceHasRemoteOwner(state, tabId, runtimeEnvironmentId)
-      ) {
-        void closeWebRuntimeSessionTab({
-          worktreeId: owningWorktreeId,
-          tabId,
-          environmentId: runtimeEnvironmentId,
-          reason: 'user'
-        })
+      // Why: a workspace whose pages span several environments has a tab mirror on every one of
+      // those hosts, so closing it means telling all of them — treating that as unresolvable left
+      // the X doing nothing at all.
+      const activeRemoteOwnerEnvironmentIds = getBrowserWorkspaceRemoteOwnerEnvironmentIds(
+        state,
+        tabId
+      ).filter((environmentId) => isWebRuntimeSessionActive(environmentId))
+      if (activeRemoteOwnerEnvironmentIds.length > 0) {
+        for (const environmentId of activeRemoteOwnerEnvironmentIds) {
+          void closeWebRuntimeSessionTab({
+            worktreeId: owningWorktreeId,
+            tabId,
+            environmentId,
+            reason: 'user'
+          })
+        }
         return
       }
       const currentTabs = state.browserTabsByWorktree[owningWorktreeId] ?? []
@@ -1848,35 +1846,32 @@ function Terminal(): React.JSX.Element | null {
         if (unifiedTab?.isPinned) {
           continue
         }
-        const remoteOwnership =
+        // Why: see handleCloseBrowserTab — every environment owning a page keeps its own tab
+        // mirror, so a workspace spanning several has to close on all of them.
+        const activeRemoteOwnerEnvironmentIds =
           unifiedTab?.contentType === 'browser'
-            ? getBrowserWorkspaceRemoteOwnership(state, unifiedTab.entityId)
-            : null
-        if (remoteOwnership?.kind === 'ambiguous') {
-          continue
-        }
-        const runtimeEnvironmentId =
-          remoteOwnership?.kind === 'exact'
-            ? remoteOwnership.environmentId
-            : getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
-        if (
-          isWebRuntimeSessionActive(runtimeEnvironmentId) &&
-          (unifiedTab?.contentType === 'terminal' ||
-            (unifiedTab?.contentType === 'browser' &&
-              browserWorkspaceHasRemoteOwner(state, unifiedTab.entityId, runtimeEnvironmentId)))
-        ) {
-          if (unifiedTab.contentType === 'terminal') {
-            // Why: paired-host bulk close must revoke renderer resume and hook authority, not just remove the host session tab.
-            // No running-process prompt: "Close Others" over N busy tabs would be a modal storm.
-            closeTerminalTab(unifiedTab.entityId, { skipRunningProcessConfirm: true })
-          } else {
+            ? getBrowserWorkspaceRemoteOwnerEnvironmentIds(state, unifiedTab.entityId).filter(
+                (environmentId) => isWebRuntimeSessionActive(environmentId)
+              )
+            : []
+        if (activeRemoteOwnerEnvironmentIds.length > 0) {
+          for (const environmentId of activeRemoteOwnerEnvironmentIds) {
             void closeWebRuntimeSessionTab({
               worktreeId: activeWorktreeId,
-              tabId: unifiedTab.id,
-              environmentId: runtimeEnvironmentId,
+              tabId: unifiedTab!.id,
+              environmentId,
               reason: 'user'
             })
           }
+          continue
+        }
+        if (
+          unifiedTab?.contentType === 'terminal' &&
+          isWebRuntimeSessionActive(getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId))
+        ) {
+          // Why: paired-host bulk close must revoke renderer resume and hook authority, not just remove the host session tab.
+          // No running-process prompt: "Close Others" over N busy tabs would be a modal storm.
+          closeTerminalTab(unifiedTab.entityId, { skipRunningProcessConfirm: true })
           continue
         }
         if ((state.tabsByWorktree[activeWorktreeId] ?? []).some((tab) => tab.id === id)) {
