@@ -198,7 +198,7 @@ describe('useIpcEvents browser tab close routing', () => {
     const { onConfirm } = requestPinnedTabCloseConfirm.mock.calls[0][0] as { onConfirm: () => void }
     onConfirm()
 
-    expect(closeBrowserTab).toHaveBeenCalledWith('workspace-1')
+    expect(closeBrowserTab).toHaveBeenCalledWith('workspace-1', undefined)
   })
 
   it('confirms CLI workspace browser closes and replies after confirmation', async () => {
