@@ -765,8 +765,9 @@ test('keeps a split made while the paired create is still staged', async ({
       { groupId: rootGroupId, tabId: stagedTabId as string }
     )
     const split = await readPanes(client.page, worktreeId)
-    const splitGroupId = split.groups.find((group) => group.tabOrder.includes(stagedTabId as string))
-      ?.id
+    const splitGroupId = split.groups.find((group) =>
+      group.tabOrder.includes(stagedTabId as string)
+    )?.id
     expect(splitGroupId).toBeDefined()
     expect(splitGroupId).not.toBe(rootGroupId)
     expect(split.layoutGroupIds).toContain(splitGroupId)
@@ -831,9 +832,9 @@ test('leaves the user on the tab they switched to during client-host preparation
         message: 'paired client never staged the optimistic browser tab'
       })
       .toBe('staged')
-    expect(requireGroup(await readPanes(client.page, worktreeId), rootGroupId).activeTabId).not.toBe(
-      otherTabId
-    )
+    expect(
+      requireGroup(await readPanes(client.page, worktreeId), rootGroupId).activeTabId
+    ).not.toBe(otherTabId)
 
     // The user clicks back to their terminal while the desktop host is still being prepared.
     await client.page.evaluate(

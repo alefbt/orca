@@ -291,7 +291,10 @@ describe('staged browser rows stay authoritative through adoption', () => {
       url: 'about:blank'
     })
 
-    const next = applyPatch(state, makeSnapshot([hostTab('Example Domain', 'https://example.com/')]))
+    const next = applyPatch(
+      state,
+      makeSnapshot([hostTab('Example Domain', 'https://example.com/')])
+    )
 
     expect(next.browserPagesByWorkspace[WORKSPACE_ID]?.[0]?.title).toBe('Example Domain')
   })

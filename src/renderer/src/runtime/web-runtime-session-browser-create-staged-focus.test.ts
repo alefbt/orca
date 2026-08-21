@@ -134,7 +134,10 @@ describe('browser create focus intent across the client-host preparation await',
 
     let intentAtReconcile: ReturnType<typeof peekWebSessionFocusIntent> | undefined
     mocks.applyFreshWebSessionTabsSnapshot.mockImplementation(() => {
-      intentAtReconcile ??= peekWebSessionFocusIntent({ environmentId: ENVIRONMENT_ID }, WORKTREE_ID)
+      intentAtReconcile ??= peekWebSessionFocusIntent(
+        { environmentId: ENVIRONMENT_ID },
+        WORKTREE_ID
+      )
       return { state: 'after' }
     })
 

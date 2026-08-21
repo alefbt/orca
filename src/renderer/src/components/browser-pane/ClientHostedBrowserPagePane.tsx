@@ -192,7 +192,12 @@ export function ClientHostedBrowserPagePane({
     // Why: no placement means the host has not minted this page yet. Attaching would throw for an
     // id the retained registry has never seen and strand the pane on the unavailable notice, whose
     // only exit is reopening on the server — so mount quiet and wait for adoption to supply it.
-    if (!viewport || pageHostGeneration === null || browserHostClientId === null || browserHostGeneration === null) {
+    if (
+      !viewport ||
+      pageHostGeneration === null ||
+      browserHostClientId === null ||
+      browserHostGeneration === null
+    ) {
       return
     }
     let attachment: ReturnType<typeof attachBrowserClientPageToViewport>

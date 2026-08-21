@@ -278,6 +278,13 @@ function addressBar(): HTMLInputElement {
   return document.querySelector('[data-orca-browser-address-bar]') as HTMLInputElement
 }
 
+/** The page generations the pane has attached a guest for, in call order. */
+function attachedGenerations(): number[] {
+  return mocks.attach.mock.calls.map(
+    (call) => (call[0] as { pageHostGeneration: number }).pageHostGeneration
+  )
+}
+
 /** Type into the bar the way a user does: focus first (which opens the dropdown), then keys. */
 function startEditing(text: string): HTMLInputElement {
   const input = addressBar()
@@ -568,6 +575,31 @@ describe.each([
     expect(document.activeElement).toBe(staged)
     expect([staged.selectionStart, staged.selectionEnd]).toEqual([3, 7])
     expect(mocks.attach).toHaveBeenCalled()
+  })
+
+  // Why this is asserted on its own: re-attaching in place is the entire replacement for the
+  // pageHostGeneration the pane used to carry in its React key. Continuity tests stay green
+  // whether or not the guest is ever re-attached — they pass hardest when nothing happens at all.
+  it('re-attaches the guest when a host restart bumps the page generation', () => {
+    stageClientHostedHandle()
+    renderWorkspacePane()
+    act(() => adoptOntoClient())
+    act(() => flushFrames())
+
+    const bar = addressBar()
+    const stale = mocks.attach.mock.results.at(-1)?.value as { detach: ReturnType<typeof vi.fn> }
+    expect(attachedGenerations()).toContain(CLIENT_PLACEMENT.pageHostGeneration)
+    expect(attachedGenerations()).not.toContain(CLIENT_PLACEMENT.pageHostGeneration + 1)
+
+    act(() => adoptOntoClient(CLIENT_PLACEMENT.pageHostGeneration + 1))
+    act(() => flushFrames())
+
+    // The host retired the old guest with the generation it belonged to; a pane still holding it
+    // renders a dead webview that no longer answers.
+    expect(attachedGenerations()).toContain(CLIENT_PLACEMENT.pageHostGeneration + 1)
+    expect(stale.detach).toHaveBeenCalled()
+    // ...without rebuilding the chrome around it, which is what the key change bought.
+    expect(addressBar()).toBe(bar)
   })
 
   // Why this path still matters: the staged pane is chosen from a cached runtime status, and a
