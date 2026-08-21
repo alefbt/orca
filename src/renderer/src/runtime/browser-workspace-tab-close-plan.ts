@@ -45,7 +45,7 @@ export function planBrowserWorkspaceTabClose({
     closesLocally: true,
     removesVisibleTab: true
   }
-  const hasLocalPages = (state.browserPagesByWorkspace[workspaceId] ?? []).length > 0
+  const hasPages = (state.browserPagesByWorkspace[workspaceId] ?? []).length > 0
   const ownerEnvironmentIds = getBrowserWorkspaceRemoteOwnerEnvironmentIds(state, workspaceId)
   if (ownerEnvironmentIds.length > 0) {
     const activeEnvironmentIds = ownerEnvironmentIds.filter((environmentId) =>
@@ -58,14 +58,15 @@ export function planBrowserWorkspaceTabClose({
       : {
           hostEnvironmentIds: activeEnvironmentIds,
           closesLocally: false,
-          // Why: a host that still holds pages removes its own mirror through tab sync.
-          removesVisibleTab: !hasLocalPages
+          // Why: owners are derived from this workspace's pages, so reaching here means it has
+          // some — and a host that still holds pages removes its own mirror through tab sync.
+          removesVisibleTab: false
         }
   }
   // Why: a workspace with pages of its own and no remote owner is a local fallback — the focused
   // runtime being connected does not make its tab the host's to close. A PAGELESS one is the
   // host's mirror and would otherwise be un-closable.
-  if (hasLocalPages || !isEnvironmentActive(focusedEnvironmentId)) {
+  if (hasPages || !isEnvironmentActive(focusedEnvironmentId)) {
     return closeLocally
   }
   return {

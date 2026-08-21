@@ -53,8 +53,13 @@ describe('planBrowserWorkspaceTabClose', () => {
       { activeEnvironmentIds: ['env-a', 'env-b'] }
     )
 
-    expect([...result.hostEnvironmentIds].sort()).toEqual(['env-a', 'env-b'])
-    expect(result.closesLocally).toBe(false)
+    // Why: the plan promises no ordering, so only the owner set is sorted — the rest of the shape
+    // is asserted whole, including that the connected hosts still own the mirror removal.
+    expect({ ...result, hostEnvironmentIds: [...result.hostEnvironmentIds].sort() }).toEqual({
+      hostEnvironmentIds: ['env-a', 'env-b'],
+      closesLocally: false,
+      removesVisibleTab: false
+    })
   })
 
   it('skips an owner whose session is not connected, and still closes the ones that are', () => {
@@ -66,8 +71,13 @@ describe('planBrowserWorkspaceTabClose', () => {
       { activeEnvironmentIds: ['env-b'] }
     )
 
-    expect(result.hostEnvironmentIds).toEqual(['env-b'])
-    expect(result.closesLocally).toBe(false)
+    // Why: the connected owner removes the mirror through tab sync, so the client must not also
+    // remove it — a partial disconnect does not change who owns that removal.
+    expect(result).toEqual({
+      hostEnvironmentIds: ['env-b'],
+      closesLocally: false,
+      removesVisibleTab: false
+    })
   })
 
   it('tears down locally when no owning environment is connected', () => {

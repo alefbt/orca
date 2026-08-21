@@ -151,7 +151,6 @@ import {
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import {
   activateWebRuntimeSessionTab,
-  closeWebRuntimeSessionTab,
   createWebRuntimeSessionBrowserTab,
   createWebRuntimeSessionTerminal,
   isWebRuntimeSessionActive
@@ -184,10 +183,8 @@ import { closeTerminalTab } from './terminal/terminal-tab-actions'
 import { translate } from '@/i18n/i18n'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getResolvedExecutionHostIdForWorktree } from '@/lib/resolved-worktree-execution-host'
-import {
-  browserWorkspaceHasRemoteOwner,
-  getBrowserWorkspaceRemoteOwnerEnvironmentIds
-} from '@/runtime/remote-browser-tab-ownership'
+import { browserWorkspaceHasRemoteOwner } from '@/runtime/remote-browser-tab-ownership'
+import { closeBrowserWorkspaceTabOnHosts } from '@/runtime/browser-workspace-tab-close'
 import {
   combineTerminalWorktreeParkIds,
   useManualTerminalWorktreeParking
@@ -1756,21 +1753,21 @@ function Terminal(): React.JSX.Element | null {
       if (isPinnedVisibleTab(state, owningWorktreeId, tabId)) {
         return
       }
-      // Why: a workspace whose pages span several environments has a tab mirror on every one of
-      // those hosts, so closing it means telling all of them — treating that as unresolvable left
-      // the X doing nothing at all.
-      const activeRemoteOwnerEnvironmentIds = getBrowserWorkspaceRemoteOwnerEnvironmentIds(
+      const plan = closeBrowserWorkspaceTabOnHosts({
         state,
-        tabId
-      ).filter((environmentId) => isWebRuntimeSessionActive(environmentId))
-      if (activeRemoteOwnerEnvironmentIds.length > 0) {
-        for (const environmentId of activeRemoteOwnerEnvironmentIds) {
-          void closeWebRuntimeSessionTab({
-            worktreeId: owningWorktreeId,
-            tabId,
-            environmentId,
-            reason: 'user'
-          })
+        worktreeId: owningWorktreeId,
+        workspaceId: tabId,
+        visibleTabId: tabId,
+        focusedEnvironmentId: getRuntimeEnvironmentIdForWorktree(state, owningWorktreeId)
+      })
+      if (!plan.closesLocally) {
+        if (plan.removesVisibleTab) {
+          const mirroredTab = (state.unifiedTabsByWorktree[owningWorktreeId] ?? []).find(
+            (candidate) => candidate.contentType === 'browser' && candidate.entityId === tabId
+          )
+          if (mirroredTab) {
+            state.closeUnifiedTab(mirroredTab.id)
+          }
         }
         return
       }
@@ -1846,24 +1843,20 @@ function Terminal(): React.JSX.Element | null {
         if (unifiedTab?.isPinned) {
           continue
         }
-        // Why: see handleCloseBrowserTab — every environment owning a page keeps its own tab
-        // mirror, so a workspace spanning several has to close on all of them.
-        const activeRemoteOwnerEnvironmentIds =
-          unifiedTab?.contentType === 'browser'
-            ? getBrowserWorkspaceRemoteOwnerEnvironmentIds(state, unifiedTab.entityId).filter(
-                (environmentId) => isWebRuntimeSessionActive(environmentId)
-              )
-            : []
-        if (activeRemoteOwnerEnvironmentIds.length > 0) {
-          for (const environmentId of activeRemoteOwnerEnvironmentIds) {
-            void closeWebRuntimeSessionTab({
-              worktreeId: activeWorktreeId,
-              tabId: unifiedTab!.id,
-              environmentId,
-              reason: 'user'
-            })
+        if (unifiedTab?.contentType === 'browser') {
+          const plan = closeBrowserWorkspaceTabOnHosts({
+            state,
+            worktreeId: activeWorktreeId,
+            workspaceId: unifiedTab.entityId,
+            visibleTabId: unifiedTab.id,
+            focusedEnvironmentId: getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+          })
+          if (!plan.closesLocally) {
+            if (plan.removesVisibleTab) {
+              state.closeUnifiedTab(unifiedTab.id)
+            }
+            continue
           }
-          continue
         }
         if (
           unifiedTab?.contentType === 'terminal' &&

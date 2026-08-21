@@ -3,13 +3,10 @@ import type { Tab } from '../../../../shared/tab-types'
 import { useAppStore } from '../../store'
 import { destroyWorkspaceWebviews } from '../../store/slices/browser-webview-cleanup'
 import { requestEditorFileClose } from '../editor/editor-autosave'
-import {
-  closeWebRuntimeSessionTab,
-  isWebRuntimeSessionActive
-} from '../../runtime/web-runtime-session'
+import { isWebRuntimeSessionActive } from '../../runtime/web-runtime-session'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
-import { planBrowserWorkspaceTabClose } from '@/runtime/browser-workspace-tab-close-plan'
+import { closeBrowserWorkspaceTabOnHosts } from '@/runtime/browser-workspace-tab-close'
 
 export function useTabGroupTabCloseCommands({
   worktreeId,
@@ -61,6 +58,28 @@ export function useTabGroupTabCloseCommands({
     }
   }, [setActiveWorktree, worktreeId])
 
+  const closeBrowserItem = useCallback(
+    (item: Tab, focusedEnvironmentId: string | null | undefined) => {
+      const state = useAppStore.getState()
+      const plan = closeBrowserWorkspaceTabOnHosts({
+        state,
+        worktreeId,
+        workspaceId: item.entityId,
+        visibleTabId: item.id,
+        focusedEnvironmentId
+      })
+      if (plan.closesLocally) {
+        destroyWorkspaceWebviews(state.browserPagesByWorkspace, item.entityId)
+        closeBrowserTab(item.entityId)
+      }
+      if (plan.removesVisibleTab) {
+        closeUnifiedTab(item.id)
+      }
+      return plan
+    },
+    [closeBrowserTab, closeUnifiedTab, worktreeId]
+  )
+
   const closeItem = useCallback(
     (itemId: string, opts?: { skipEmptyCheck?: boolean }) => {
       const item = groupTabs.find((candidate) => candidate.id === itemId)
@@ -84,29 +103,7 @@ export function useTabGroupTabCloseCommands({
         return
       }
       if (item.contentType === 'browser') {
-        const browserState = useAppStore.getState()
-        const plan = planBrowserWorkspaceTabClose({
-          state: browserState,
-          workspaceId: item.entityId,
-          focusedEnvironmentId: runtimeEnvironmentId,
-          isEnvironmentActive: isWebRuntimeSessionActive
-        })
-        for (const environmentId of plan.hostEnvironmentIds) {
-          void closeWebRuntimeSessionTab({
-            worktreeId,
-            tabId: item.id,
-            environmentId,
-            reason: 'user'
-          })
-        }
-        if (plan.closesLocally) {
-          destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
-          closeBrowserTab(item.entityId)
-        }
-        if (plan.removesVisibleTab) {
-          closeUnifiedTab(item.id)
-        }
-        if (!plan.closesLocally) {
+        if (!closeBrowserItem(item, runtimeEnvironmentId).closesLocally) {
           return
         }
       } else if (item.contentType === 'simulator') {
@@ -123,7 +120,7 @@ export function useTabGroupTabCloseCommands({
       }
     },
     [
-      closeBrowserTab,
+      closeBrowserItem,
       closeEditorIfUnreferenced,
       closeUnifiedTab,
       groupTabs,
@@ -150,29 +147,7 @@ export function useTabGroupTabCloseCommands({
           continue
         }
         if (item.contentType === 'browser') {
-          // Why: see closeItem — host-close every owning runtime, or tear down locally.
-          const browserState = useAppStore.getState()
-          const plan = planBrowserWorkspaceTabClose({
-            state: browserState,
-            workspaceId: item.entityId,
-            focusedEnvironmentId: runtimeEnvironmentId,
-            isEnvironmentActive: isWebRuntimeSessionActive
-          })
-          for (const environmentId of plan.hostEnvironmentIds) {
-            void closeWebRuntimeSessionTab({
-              worktreeId,
-              tabId: item.id,
-              environmentId,
-              reason: 'user'
-            })
-          }
-          if (plan.closesLocally) {
-            destroyWorkspaceWebviews(browserState.browserPagesByWorkspace, item.entityId)
-            closeBrowserTab(item.entityId)
-          }
-          if (plan.removesVisibleTab) {
-            closeUnifiedTab(item.id)
-          }
+          closeBrowserItem(item, runtimeEnvironmentId)
         } else if (item.contentType === 'terminal') {
           closeTab(item.entityId)
         } else if (item.contentType === 'simulator') {
@@ -185,7 +160,7 @@ export function useTabGroupTabCloseCommands({
         }
       }
     },
-    [closeBrowserTab, closeEditorIfUnreferenced, closeTab, closeUnifiedTab, groupTabs, worktreeId]
+    [closeBrowserItem, closeEditorIfUnreferenced, closeTab, closeUnifiedTab, groupTabs, worktreeId]
   )
 
   return { closeItem, closeMany, leaveWorktreeIfEmpty }

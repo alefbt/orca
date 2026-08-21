@@ -43,6 +43,7 @@ let closeBrowserTab: ReturnType<typeof vi.fn>
 beforeEach(() => {
   // clearAllMocks leaves implementations in place, so a per-test mockReturnValue would leak.
   mocks.isWebRuntimeSessionActive.mockReturnValue(true)
+  mocks.getRuntimeEnvironmentIdForWorktree.mockReturnValue(null)
   closeUnifiedTab = vi.fn()
   closeBrowserTab = vi.fn()
   useAppStore.setState({
@@ -104,6 +105,35 @@ describe('closing a browser workspace owned by more than one runtime environment
     expect(mocks.closeWebRuntimeSessionTab).not.toHaveBeenCalled()
     expect(mocks.destroyWorkspaceWebviews).toHaveBeenCalled()
     expect(closeBrowserTab).toHaveBeenCalledWith('workspace-a')
+    expect(closeUnifiedTab).toHaveBeenCalledWith('unified-browser')
+  })
+
+  // Why: a mirror of a host tab has no page of its own, so nothing names an owner — without the
+  // focused runtime standing in, the X removed nothing and the host re-mirrored the tab.
+  it('removes a pageless host mirror through the focused runtime', () => {
+    useAppStore.setState({
+      browserPagesByWorkspace: {},
+      remoteBrowserPageHandlesByPageId: {}
+    } as never)
+    mocks.getRuntimeEnvironmentIdForWorktree.mockReturnValue('env-focused')
+
+    commands().closeItem('unified-browser')
+
+    expect(closedEnvironmentIds()).toEqual(['env-focused'])
+    expect(closeUnifiedTab).toHaveBeenCalledWith('unified-browser')
+    expect(mocks.destroyWorkspaceWebviews).not.toHaveBeenCalled()
+  })
+
+  it('routes the bulk close through the same plan for a pageless host mirror', () => {
+    useAppStore.setState({
+      browserPagesByWorkspace: {},
+      remoteBrowserPageHandlesByPageId: {}
+    } as never)
+    mocks.getRuntimeEnvironmentIdForWorktree.mockReturnValue('env-focused')
+
+    commands().closeMany(['unified-browser'])
+
+    expect(closedEnvironmentIds()).toEqual(['env-focused'])
     expect(closeUnifiedTab).toHaveBeenCalledWith('unified-browser')
   })
 
