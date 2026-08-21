@@ -7,34 +7,44 @@ import { describe, expect, it } from 'vitest'
 // pageless host mirror was un-closable, and the menu's Close Tab fired at a host that had never
 // heard of a staged tab. Testing planBrowserWorkspaceTabClose in isolation cannot catch the next
 // site that skips it, so this census pins every renderer file that closes a browser workspace:
-// how many close calls it makes, and whether it asks the shared plan first. Adding a close call
-// anywhere fails this test until it is classified here.
+// how often it reaches for the store action, and whether it asks the shared plan first. Adding a
+// close anywhere fails this test until it is classified here.
 const BROWSER_WORKSPACE_CLOSE_SITES: {
   path: string
-  closeCalls: number
+  /**
+   * Every mention of the identifier, not just call expressions: a renamed destructure or a
+   * `store['closeBrowserTab']` lookup is still a close site, and matching `closeBrowserTab(`
+   * walks straight past both.
+   */
+  closeBrowserTabMentions: number
   /** How many local teardowns forward the plan's cleanup reason; 0 for sites that skip the plan. */
   planReasonForwardings: number
+  /** How many closeBrowserTab calls actually pass that reason on; 0 for sites that skip the plan. */
+  reasonCarryingCloseCalls: number
   routesThroughPlan: boolean
   why: string
 }[] = [
   {
     path: 'src/renderer/src/components/Terminal.tsx',
+    closeBrowserTabMentions: 8,
+    reasonCarryingCloseCalls: 3,
     planReasonForwardings: 2,
-    closeCalls: 3,
     routesThroughPlan: true,
     why: 'handleCloseBrowserTab (legacy tab bar + Cmd/Ctrl+W) and closeTabBarTabs (bulk close).'
   },
   {
     path: 'src/renderer/src/components/tab-group/useTabGroupTabCloseCommands.ts',
+    closeBrowserTabMentions: 4,
+    reasonCarryingCloseCalls: 1,
     planReasonForwardings: 1,
-    closeCalls: 1,
     routesThroughPlan: true,
     why: 'closeBrowserItem, shared by the split-pane strip X (closeItem) and bulk close (closeMany).'
   },
   {
     path: 'src/renderer/src/hooks/useIpcEvents.ts',
+    closeBrowserTabMentions: 7,
+    reasonCarryingCloseCalls: 1,
     planReasonForwardings: 1,
-    closeCalls: 7,
     routesThroughPlan: true,
     why:
       'onCloseActiveTab is the local menu close and routes through the plan. The other five ' +
@@ -43,8 +53,9 @@ const BROWSER_WORKSPACE_CLOSE_SITES: {
   },
   {
     path: 'src/renderer/src/components/floating-terminal/FloatingTerminalPanel.tsx',
+    closeBrowserTabMentions: 6,
+    reasonCarryingCloseCalls: 0,
     planReasonForwardings: 0,
-    closeCalls: 2,
     routesThroughPlan: false,
     why:
       'The floating workspace is never host-mirrored — applyWebSessionTabsSnapshot returns state ' +
@@ -52,22 +63,25 @@ const BROWSER_WORKSPACE_CLOSE_SITES: {
   },
   {
     path: 'src/renderer/src/components/browser-pane/stream-remote/use-remote-browser-page-lifecycle.ts',
+    closeBrowserTabMentions: 4,
+    reasonCarryingCloseCalls: 0,
     planReasonForwardings: 0,
-    closeCalls: 1,
     routesThroughPlan: false,
     why: 'Mirrors a page the host already retired; a plan-driven close would echo it back.'
   },
   {
     path: 'src/renderer/src/runtime/web-runtime-browser-tab-staging.ts',
+    closeBrowserTabMentions: 1,
+    reasonCarryingCloseCalls: 0,
     planReasonForwardings: 0,
-    closeCalls: 1,
     routesThroughPlan: false,
     why: 'Unwinds rows this client minted for a create that never landed — there is no host page.'
   },
   {
     path: 'src/renderer/src/store/slices/browser.ts',
+    closeBrowserTabMentions: 3,
+    reasonCarryingCloseCalls: 0,
     planReasonForwardings: 0,
-    closeCalls: 1,
     routesThroughPlan: false,
     why: 'shutdownWorktreeBrowsers tears the whole worktree down; the slice is the seam itself.'
   }
@@ -79,7 +93,12 @@ function listSourceFiles(dir: string): string[] {
     if (entry.isDirectory()) {
       return listSourceFiles(fullPath)
     }
-    if (!/\.(ts|tsx)$/.test(entry.name) || /\.test\.(ts|tsx)$/.test(entry.name)) {
+    // Test harnesses and fixtures stub the store action rather than closing anything.
+    if (
+      !/\.(ts|tsx)$/.test(entry.name) ||
+      /\.test\.(ts|tsx)$/.test(entry.name) ||
+      /-test-(harness|fixtures)\.(ts|tsx)$/.test(entry.name)
+    ) {
       return []
     }
     return [fullPath]
@@ -92,16 +111,16 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
 }
 
-function countCloseCalls(source: string): number {
-  return stripComments(source).match(/\bcloseBrowserTab\(/g)?.length ?? 0
+function countCloseBrowserTabMentions(source: string): number {
+  return stripComments(source).match(/\bcloseBrowserTab\b/g)?.length ?? 0
 }
 
 describe('browser workspace close census', () => {
   it.each(BROWSER_WORKSPACE_CLOSE_SITES)(
-    '$path closes $closeCalls browser workspaces, plan-routed: $routesThroughPlan',
-    ({ path, closeCalls, routesThroughPlan }) => {
+    '$path mentions closeBrowserTab $closeBrowserTabMentions times, plan-routed: $routesThroughPlan',
+    ({ path, closeBrowserTabMentions, routesThroughPlan }) => {
       const source = stripComments(readFileSync(join(process.cwd(), path), 'utf8'))
-      expect(countCloseCalls(source)).toBe(closeCalls)
+      expect(countCloseBrowserTabMentions(source)).toBe(closeBrowserTabMentions)
       expect(/\bcloseBrowserWorkspaceTabOnHosts\(/.test(source)).toBe(routesThroughPlan)
     }
   )
@@ -109,7 +128,7 @@ describe('browser workspace close census', () => {
   it('lists every renderer file that closes a browser workspace', () => {
     const root = join(process.cwd(), 'src/renderer')
     const closers = listSourceFiles(root)
-      .filter((filePath) => countCloseCalls(readFileSync(filePath, 'utf8')) > 0)
+      .filter((filePath) => countCloseBrowserTabMentions(readFileSync(filePath, 'utf8')) > 0)
       .map((filePath) => relative(process.cwd(), filePath).split(sep).join('/'))
       .sort()
     expect(closers).toEqual(BROWSER_WORKSPACE_CLOSE_SITES.map((site) => site.path).sort())
@@ -122,11 +141,21 @@ describe('browser workspace close census', () => {
   it('every plan-routed site forwards the plan cleanup reason into its local teardown', () => {
     const forwardsReason =
       /plan\.localCloseReason\s*\?\s*\{\s*reason:\s*plan\.localCloseReason\s*\}\s*:\s*undefined/g
+    // Why: the expression existing somewhere in the file is not the wiring — a call that drops it on
+    // the floor reads identically. Both halves are pinned: the reason is computed, and the close
+    // calls carry it.
+    const carriesReason =
+      /closeBrowserTab\(\s*[^()]*?(?:[Cc]loseOptions|plan\.localCloseReason)[^()]*?\)/g
     for (const site of BROWSER_WORKSPACE_CLOSE_SITES) {
       const source = stripComments(readFileSync(join(process.cwd(), site.path), 'utf8'))
-      expect({ path: site.path, forwards: source.match(forwardsReason)?.length ?? 0 }).toEqual({
+      expect({
         path: site.path,
-        forwards: site.planReasonForwardings
+        forwards: source.match(forwardsReason)?.length ?? 0,
+        carrying: source.match(carriesReason)?.length ?? 0
+      }).toEqual({
+        path: site.path,
+        forwards: site.planReasonForwardings,
+        carrying: site.reasonCarryingCloseCalls
       })
     }
   })
