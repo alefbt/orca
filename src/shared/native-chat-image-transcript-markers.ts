@@ -48,9 +48,14 @@ export function stripImagePromptMarker(text: string): string {
  * `\u0015<body>` or `\u001b[200~<path>\u001b[201~`. None of that is whitespace, so
  * trim() and /\s/ leave it in place and a send can never equal its own row.
  *
- * Escape sequences come off before lone control bytes — stripping ESC first would
- * strand the printable `[200~` tail — and both come off before the marker strip,
- * because a leading control byte hides an `[Image #N]` from the start-of-text test.
+ * Escape sequences come off before lone control bytes — stripping ESC as a control
+ * byte first would strand the printable `[200~` tail — and both come off before the
+ * marker strip, because a leading control byte hides an `[Image #N]` from the
+ * start-of-text test.
+ *
+ * Only the Ctrl+U shape is attested by captured JSONL. A row bearing the paste
+ * markers WITHOUT their ESC is out of reach on purpose: bare `[200~` is text a user
+ * could have typed, and guessing at it would eat real prompts.
  */
 export function normalizeNativeChatUserText(text: string): string {
   return stripImagePromptMarker(
