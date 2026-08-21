@@ -1645,7 +1645,8 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         if (!hasAgent) {
           throw new Error(
             `Cannot dispatch --inject to terminal ${to}: no recognized agent detected. ` +
-              'Start an agent CLI (e.g. claude, codex, gemini, droid, cursor) in the terminal first, ' +
+              'Inject accepts any agent CLI Orca supports (for example claude, codex, or agy) — ' +
+              'this list is not an allowlist. Start one in the terminal first, ' +
               'or dispatch without --inject and send the prompt manually.'
           )
         }

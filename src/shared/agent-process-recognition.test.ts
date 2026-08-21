@@ -360,6 +360,30 @@ describe('agent process recognition', () => {
     expect(isAgentForegroundWrapperProcess('vim.exe')).toBe(false)
   })
 
+  it('recognizes the Antigravity CLI from its native `agy` install layouts', () => {
+    // Why: the installer ships a flat native build named `agy` (~/.local/bin/agy on
+    // Unix, %LOCALAPPDATA%\agy\bin\agy.exe on Windows) — there is no npm package,
+    // so `node_modules/antigravity/` is somebody else's placeholder, not this agent.
+    const agy = { agent: 'antigravity', processName: 'agy' }
+
+    expect(recognizeAgentProcess('agy')).toEqual(agy)
+    expect(recognizeAgentProcess('/Users/dev/.local/bin/agy')).toEqual(agy)
+    expect(recognizeAgentProcess(String.raw`C:\Users\dev\AppData\Local\agy\bin\agy.exe`)).toEqual(
+      agy
+    )
+    expect(
+      recognizeAgentProcessFromCommandLine(
+        String.raw`"C:\Users\dev\AppData\Local\agy\bin\agy.exe" --dangerously-skip-permissions`
+      )
+    ).toEqual(agy)
+    expect(recognizeAgentProcessFromCommandLine('agy --dangerously-skip-permissions')).toEqual(agy)
+    expect(
+      recognizeAgentProcessFromCommandLine(
+        'node /usr/local/lib/node_modules/antigravity/bin/antigravity.js'
+      )
+    ).toBeNull()
+  })
+
   it('recognizes versioned Grok process names observed from the installed CLI', () => {
     expect(recognizeAgentProcess('grok-0.2.51')).toEqual({
       agent: 'grok',
