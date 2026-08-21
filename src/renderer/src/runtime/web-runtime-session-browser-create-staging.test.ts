@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWebRuntimeSessionBrowserTab } from './web-runtime-session'
+import { discardStagedWebRuntimeBrowserTab } from './web-runtime-browser-tab-staging'
 import { resetWebSessionCloseIntentForTests } from './web-session-close-intent'
 import {
   ENVIRONMENT_ID,
@@ -77,6 +78,38 @@ function advertiseKnownPageId(): void {
       ]
     ])
   })
+}
+
+/** The strip's cleanup close, as the store leaves things: workspace, pages and handles all gone. */
+function closeStagedWorkspace(workspaceId: string): void {
+  const state = mocks.getState()
+  for (const page of state.browserPagesByWorkspace[workspaceId] ?? []) {
+    delete state.remoteBrowserPageHandlesByPageId[page.id]
+  }
+  delete state.browserPagesByWorkspace[workspaceId]
+  for (const worktreeId of Object.keys(state.browserTabsByWorktree)) {
+    state.browserTabsByWorktree[worktreeId] = state.browserTabsByWorktree[worktreeId].filter(
+      (workspace: { id: string }) => workspace.id !== workspaceId
+    )
+  }
+}
+
+function runtimeRequests(runtimeCall: {
+  mock: { calls: unknown[][] }
+}): { method: string; params?: { page?: string } }[] {
+  return runtimeCall.mock.calls.map(
+    ([request]) => request as { method: string; params?: { page?: string } }
+  )
+}
+
+function calledMethods(runtimeCall: { mock: { calls: unknown[][] } }): string[] {
+  return runtimeRequests(runtimeCall).map((request) => request.method)
+}
+
+function closedHostPages(runtimeCall: { mock: { calls: unknown[][] } }): string[] {
+  return runtimeRequests(runtimeCall)
+    .filter((request) => request.method === 'browser.tabClose')
+    .map((request) => request.params?.page ?? '')
 }
 
 afterEach(() => resetWebSessionCloseIntentForTests())
@@ -259,6 +292,113 @@ describe('createWebRuntimeSessionBrowserTab optimistic staging', () => {
     ])
     expect(mocks.setRemoteBrowserPageHandle).toHaveBeenCalledTimes(1)
     expect(stagedBrowserTabMocks.closeBrowserTab).not.toHaveBeenCalled()
+  })
+
+  // Why: the strip's X on a staged tab can only unwind local rows — the host page did not exist
+  // when the user clicked. Without this the create finishes into a snapshot that re-adds the tab
+  // the user just closed, and the host keeps a page nobody can see.
+  it('retires the host page when the staged tab is closed before the create answers', async () => {
+    mocks.hasMaterializedWebRuntimeBrowserPage.mockReturnValue(false)
+    const runtimeCall = vi.fn((request: { method: string; params: { page?: string } }) => {
+      if (request.method === 'browser.tabCreate') {
+        closeStagedWorkspace('staged-workspace-1')
+        return Promise.resolve({
+          id: 'create',
+          ok: true,
+          result: { browserPageId: 'host-page-1' }
+        })
+      }
+      if (request.method === 'browser.tabClose') {
+        return Promise.resolve({ id: 'close', ok: true, result: { closed: true } })
+      }
+      return Promise.resolve({ id: 'list', ok: true, result: makeSnapshot() })
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(
+      createWebRuntimeSessionBrowserTab({
+        worktreeId: WORKTREE_ID,
+        environmentId: ENVIRONMENT_ID
+      })
+    ).resolves.toBe(false)
+
+    // Why: the sequence is the assertion. Left to run on, the create waits out the materialization
+    // timeout and refreshes the snapshot first — and that refresh, taken while the host page is
+    // still open, is what re-adds the tab the user just closed under a fresh workspace id.
+    expect(calledMethods(runtimeCall)).toEqual([
+      'browser.tabCreate',
+      'browser.tabClose',
+      'session.tabs.list'
+    ])
+    expect(closedHostPages(runtimeCall)).toEqual(['host-page-1'])
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([])
+    // Why: the cancelling close already dropped the handle, so the unwind must not fire a second
+    // teardown for rows that are gone.
+    expect(stagedBrowserTabMocks.closeBrowserTab).not.toHaveBeenCalled()
+  })
+
+  // Why: with a known-id host nothing rehomes, so `staged` still points at rows a snapshot may
+  // have adopted by the time a later failure unwinds. Those rows are the host's now, and the
+  // unwind must not take a tab the user is looking at down with it.
+  it('leaves rows a snapshot already adopted alone when the unwind runs', () => {
+    const state = mocks.getState()
+    state.browserPagesByWorkspace['adopted-workspace'] = [
+      { id: 'adopted-page', workspaceId: 'adopted-workspace', url: 'https://example.com/' }
+    ]
+    state.browserTabsByWorktree[WORKTREE_ID] = [
+      {
+        id: 'adopted-workspace',
+        worktreeId: WORKTREE_ID,
+        activePageId: 'adopted-page',
+        pageIds: ['adopted-page']
+      }
+    ]
+    state.remoteBrowserPageHandlesByPageId['adopted-page'] = {
+      environmentId: ENVIRONMENT_ID,
+      remotePageId: 'adopted-page'
+    }
+
+    discardStagedWebRuntimeBrowserTab({
+      workspaceId: 'adopted-workspace',
+      pageId: 'adopted-page'
+    })
+
+    expect(stagedBrowserTabMocks.closeBrowserTab).not.toHaveBeenCalled()
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([
+      { workspaceId: 'adopted-workspace', pageId: 'adopted-page', staged: false }
+    ])
+  })
+
+  // Why: adoption and cancellation both clear the staged flag, so the flag cannot tell them apart.
+  // Reading adoption as a cancel would close the tab the user is already looking at.
+  it('does not read a snapshot adopting the staged rows mid-create as a cancel', async () => {
+    const runtimeCall = vi.fn((request: { method: string }) => {
+      if (request.method === 'browser.tabCreate') {
+        // The host's snapshot lands first and takes the staged rows over in place: the flag goes,
+        // the workspace row stays.
+        const state = mocks.getState()
+        const pageId = Object.keys(state.remoteBrowserPageHandlesByPageId)[0]!
+        state.remoteBrowserPageHandlesByPageId[pageId] = {
+          environmentId: ENVIRONMENT_ID,
+          remotePageId: pageId
+        }
+        return Promise.resolve({ id: 'create', ok: true, result: { browserPageId: pageId } })
+      }
+      return Promise.resolve({ id: 'list', ok: true, result: makeSnapshot() })
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(
+      createWebRuntimeSessionBrowserTab({
+        worktreeId: WORKTREE_ID,
+        environmentId: ENVIRONMENT_ID
+      })
+    ).resolves.toBe(true)
+
+    expect(closedHostPages(runtimeCall)).toEqual([])
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([
+      { workspaceId: 'staged-workspace-1', pageId: expect.any(String), staged: false }
+    ])
   })
 
   // Why: without browser.tab-create-known-id.v1 every create rehomes onto a host-minted id, and

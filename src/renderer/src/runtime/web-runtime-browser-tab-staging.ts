@@ -56,6 +56,28 @@ export function stageWebRuntimeBrowserTab(args: {
   }
 }
 
+/** The create was abandoned because the user closed the staged tab while it was still in flight. */
+export class StagedWebRuntimeBrowserTabCancelledError extends Error {
+  constructor() {
+    super('The browser tab was closed before its create finished.')
+    this.name = 'StagedWebRuntimeBrowserTabCancelledError'
+  }
+}
+
+/**
+ * Whether the staged tab is still in the strip. The workspace row is the signal: an adopting
+ * snapshot takes over that same row, while the strip's cleanup close removes it — a distinction the
+ * handle's staged flag cannot make, because adoption clears the flag too.
+ */
+export function isStagedWebRuntimeBrowserTabLive(
+  staged: StagedWebRuntimeBrowserTab,
+  worktreeId: string
+): boolean {
+  return (useAppStore.getState().browserTabsByWorktree[worktreeId] ?? []).some(
+    (workspace) => workspace.id === staged.workspaceId
+  )
+}
+
 function findWorkspaceIdForRemotePage(args: {
   environmentId: string
   worktreeId: string

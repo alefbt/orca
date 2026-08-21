@@ -98,8 +98,10 @@ import { hasMaterializedWebRuntimeBrowserPage } from './web-runtime-browser-mate
 import { waitForWebRuntimeBrowserPageMaterialization } from './web-runtime-browser-materialization-wait'
 import {
   discardStagedWebRuntimeBrowserTab,
+  isStagedWebRuntimeBrowserTabLive,
   rehomeStagedWebRuntimeBrowserTab,
   stageWebRuntimeBrowserTab,
+  StagedWebRuntimeBrowserTabCancelledError,
   type StagedWebRuntimeBrowserTab
 } from './web-runtime-browser-tab-staging'
 import {
@@ -615,7 +617,7 @@ export async function createWebRuntimeSessionBrowserTab(args: {
       ...(args.url !== undefined ? { url: args.url } : {}),
       ...(args.stagedTitle !== undefined ? { title: args.stagedTitle } : {}),
       ...(args.profileId !== undefined ? { profileId: args.profileId } : {}),
-      ...(args.clientTargetGroupId ?? args.targetGroupId
+      ...((args.clientTargetGroupId ?? args.targetGroupId)
         ? { targetGroupId: (args.clientTargetGroupId ?? args.targetGroupId) as string }
         : {}),
       ...(args.stagedFocusAddressBar !== undefined
@@ -725,6 +727,15 @@ export async function createWebRuntimeSessionBrowserTab(args: {
         })
     }
     await pauseAfterE2eWebRuntimeBrowserCreate(created.browserPageId)
+    // Why: the strip's X on a staged tab only unwinds this client's rows — it cannot close a host
+    // page whose id did not exist when the user clicked. Hand the cancel to the cleanup path in the
+    // catch below, which already owns retiring an unreconciled host page.
+    // Why (accepted bound): this is the earliest the host page can be named, so a cancel during the
+    // create round-trip leaves that page alive for up to the RPC timeout. That is the same bound the
+    // unreconciled-cleanup path has always accepted, so no sweep is added for it.
+    if (staged && !isStagedWebRuntimeBrowserTabLive(staged, args.worktreeId)) {
+      throw new StagedWebRuntimeBrowserTabCancelledError()
+    }
     if (created.browserPageId !== provisionalPageId) {
       moveWebSessionBrowserPlacement({
         environmentId,
@@ -806,6 +817,9 @@ export async function createWebRuntimeSessionBrowserTab(args: {
       }
     }
     if (!materialized) {
+      // Why: a close landing after this point needs no separate cancel check — materialization
+      // already requires the workspace row, so an unwound staged tab lands here and takes the same
+      // cleanup path.
       throw new Error('The created browser tab did not materialize in the client.')
     }
     // Why: materialization means the snapshot has taken ownership of these rows, so nothing
@@ -923,7 +937,9 @@ export async function createWebRuntimeSessionBrowserTab(args: {
     ) {
       useAppStore.getState().closeEmptyGroup(args.worktreeId, args.clientTargetGroupId)
     }
-    if (args.failureLogMode === 'operation-only') {
+    if (error instanceof StagedWebRuntimeBrowserTabCancelledError) {
+      console.warn('[web-runtime-session] browser tab was closed before its create finished')
+    } else if (args.failureLogMode === 'operation-only') {
       console.warn('[web-runtime-session] failed to create browser tab')
     } else {
       console.warn(
