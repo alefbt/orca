@@ -1,4 +1,6 @@
 import type { AppState } from '@/store/types'
+import { clearBrowserAddressBarEditSession } from '@/components/browser-pane/assemble-chrome/browser-address-bar-edit-session'
+import { clearBrowserPageDeferredNavigation } from '@/components/browser-pane/navigate/browser-page-deferred-navigation'
 import {
   planBrowserWorkspaceTabClose,
   type BrowserWorkspaceTabClosePlan
@@ -30,6 +32,13 @@ export function closeBrowserWorkspaceTabOnHosts({
     focusedEnvironmentId,
     isEnvironmentActive: isWebRuntimeSessionActive
   })
+  // Why here: chrome the user was mid-way through — a half-typed URL, a URL submitted against a
+  // page the host had not minted yet — is parked outside React under the page id, waiting for the
+  // pane that owns it. A close is the one exit where nobody is coming to collect it.
+  for (const page of state.browserPagesByWorkspace[workspaceId] ?? []) {
+    clearBrowserAddressBarEditSession(page.id)
+    clearBrowserPageDeferredNavigation(page.id)
+  }
   for (const environmentId of plan.hostEnvironmentIds) {
     void closeWebRuntimeSessionTab({
       worktreeId,
