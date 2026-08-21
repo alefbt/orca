@@ -102,6 +102,23 @@ async function recordBrowserTabTransitions(
   }, fixture.worktreeId)
 }
 
+/** Worktree-scoped browser census, for a worktree whose group comes and goes with the tab. */
+async function readEmptyWorktreeState(
+  page: Awaited<ReturnType<typeof setUpPairedFixture>>['client']['page'],
+  worktreeId: string
+): Promise<{ activeWorktreeId: string | null; browserTabs: number; browserWorkspaces: number }> {
+  return page.evaluate((id) => {
+    const state = window.__store?.getState()
+    return {
+      activeWorktreeId: state?.activeWorktreeId ?? null,
+      browserTabs: (state?.unifiedTabsByWorktree[id] ?? []).filter(
+        (tab) => tab.contentType === 'browser'
+      ).length,
+      browserWorkspaces: (state?.browserTabsByWorktree[id] ?? []).length
+    }
+  }, worktreeId)
+}
+
 async function readBrowserTabTransitions(
   fixture: Awaited<ReturnType<typeof setUpPairedFixture>>
 ): Promise<string[]> {
@@ -308,6 +325,112 @@ test('takes back the optimistic tab when the paired create fails to reconcile', 
         worktreeId
       )
     ).toBe(0)
+    await client.page.evaluate(() =>
+      (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
+    )
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+// Why: unwinding the only tab in a worktree runs through the same store path a user close takes,
+// and that path falls back to the landing screen. A create that failed must not evict the user
+// from the workspace they were standing in when they clicked.
+test('leaves the user on an empty worktree when its first browser create fails', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(300_000)
+  const fixture = await setUpPairedFixture(testInfo, testRepoPath)
+  try {
+    const { client, rootGroupId, worktreeId } = fixture
+
+    // Empty the worktree, then stand in it again — closing the last tab deselects it by design.
+    await client.page.evaluate(
+      ({ groupId, worktreeId }) => {
+        const store = window.__store
+        const state = store?.getState()
+        if (!store || !state) {
+          throw new Error('Paired client store unavailable')
+        }
+        const group = (state.groupsByWorktree[worktreeId] ?? []).find(
+          (candidate) => candidate.id === groupId
+        )
+        // Safe to iterate while closing: the store replaces tabOrder rather than mutating it.
+        const tabOrder = group?.tabOrder ?? []
+        for (const tabId of tabOrder) {
+          store.getState().closeUnifiedTab(tabId)
+        }
+        store.getState().setActiveWorktree(worktreeId)
+      },
+      { groupId: rootGroupId, worktreeId }
+    )
+    await expect
+      .poll(
+        () =>
+          client.page.evaluate(
+            (id) => ({
+              activeWorktreeId: window.__store?.getState().activeWorktreeId ?? null,
+              tabCount: (window.__store?.getState().unifiedTabsByWorktree[id] ?? []).length
+            }),
+            worktreeId
+          ),
+        { timeout: 30_000, message: 'worktree never settled empty-but-selected' }
+      )
+      .toEqual({ activeWorktreeId: worktreeId, tabCount: 0 })
+
+    await client.page.evaluate(() => {
+      const fault = (window as FaultWindow).__webRuntimeBrowserCreationFault
+      if (!fault) {
+        throw new Error('Browser creation E2E fault seam unavailable')
+      }
+      fault.arm()
+    })
+    await client.page.evaluate(
+      ({ groupId, url }) => {
+        const state = window.__store?.getState()
+        if (!state) {
+          throw new Error('Paired client store unavailable')
+        }
+        state.setBrowserDefaultUrl(url)
+        const create = state.openNewBrowserTabInActiveWorkspace(groupId).catch(() => undefined)
+        ;(window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate = create
+      },
+      { groupId: rootGroupId, url: fixture.url }
+    )
+    // Why: an emptied worktree drops its group entirely, so the oracle has to live at worktree
+    // scope — the group only exists again for as long as the staged tab does.
+    await expect
+      .poll(() => readEmptyWorktreeState(client.page, worktreeId), {
+        timeout: 60_000,
+        message: 'paired client never staged the optimistic browser tab in the empty worktree'
+      })
+      .toEqual({ activeWorktreeId: worktreeId, browserTabs: 1, browserWorkspaces: 1 })
+
+    await expect
+      .poll(
+        () =>
+          client.page.evaluate(
+            () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.snapshot() ?? null
+          ),
+        { timeout: 60_000, message: 'held browser create never reached the fault seam' }
+      )
+      .toMatchObject({ armed: true, createdPageId: expect.any(String) })
+    expect(
+      await client.page.evaluate(
+        () => (window as FaultWindow).__webRuntimeBrowserCreationFault?.release() ?? false
+      )
+    ).toBe(true)
+    await client.page.evaluate(
+      () => (window as unknown as { __heldBrowserCreate: Promise<void> }).__heldBrowserCreate
+    )
+
+    // The rollback unwinds the tab AND leaves the user standing where they clicked.
+    await expect
+      .poll(() => readEmptyWorktreeState(client.page, worktreeId), {
+        timeout: 90_000,
+        message: 'failed browser create left its optimistic tab behind'
+      })
+      .toEqual({ activeWorktreeId: worktreeId, browserTabs: 0, browserWorkspaces: 0 })
     await client.page.evaluate(() =>
       (window as FaultWindow).__webRuntimeBrowserCreationFault?.reset()
     )

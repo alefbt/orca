@@ -175,13 +175,17 @@ async function runReconciliationFailureJourney(args: {
     // exactly one of it, in the new split. The rollback assertions after release are what prove
     // the optimism is unwound rather than stranded.
     const heldClient = await readClientTabs(page, worktreeId)
-    expect(heldClient.browserTabIds).toHaveLength(baselineClient.browserTabIds.length + 1)
-    expect(heldClient.browserWorkspaceIds).toHaveLength(
-      baselineClient.browserWorkspaceIds.length + 1
-    )
+    const addedSince = (baseline: string[], held: string[]): string[] => {
+      expect(held).toEqual(expect.arrayContaining(baseline))
+      return held.filter((id) => !baseline.includes(id))
+    }
+    expect(addedSince(baselineClient.browserTabIds, heldClient.browserTabIds)).toHaveLength(1)
+    expect(
+      addedSince(baselineClient.browserWorkspaceIds, heldClient.browserWorkspaceIds)
+    ).toHaveLength(1)
     expect(heldClient.editorTabIds).toEqual(baselineClient.editorTabIds)
     expect(heldClient.terminalTabIds).toEqual(baselineClient.terminalTabIds)
-    expect(heldClient.groupIds).toHaveLength(baselineClient.groupIds.length + 1)
+    expect(addedSince(baselineClient.groupIds, heldClient.groupIds)).toHaveLength(1)
 
     await page.screenshot({
       path: args.testInfo.outputPath(`${args.topology}-browser-reconciliation-held.png`),
