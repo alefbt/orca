@@ -53,7 +53,10 @@ export function recordWebSessionBrowserPlacement(args: {
   }
   placementByPendingPage.set(key, {
     groupId: args.groupId,
-    ownsGroupCleanup: args.callerCreatedGroup === true || existing?.ownsGroupCleanup === true
+    ownsGroupCleanup: args.callerCreatedGroup === true || existing?.ownsGroupCleanup === true,
+    // Why carried like the cleanup flag: an intent the host already spent must not come back to
+    // life because something re-recorded the page it belonged to.
+    ...(existing?.adopted ? { adopted: true } : {})
   })
 }
 
@@ -74,6 +77,13 @@ export function moveWebSessionBrowserPlacement(args: {
       groupId: placement.groupId,
       callerCreatedGroup: placement.ownsGroupCleanup
     })
+    if (placement.adopted) {
+      markWebSessionBrowserPlacementAdopted({
+        environmentId: args.environmentId,
+        worktreeId: args.worktreeId,
+        remotePageId: args.toRemotePageId
+      })
+    }
   }
 }
 
