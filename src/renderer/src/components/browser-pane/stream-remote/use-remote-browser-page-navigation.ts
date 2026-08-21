@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { redactKagiSessionToken } from '../../../../../shared/browser-url'
 import { normalizeBrowserHistoryUrl } from '../../../../../shared/workspace-session-browser-history'
 import { resolveBrowserAddressBarSubmission } from '../navigate/browser-address-bar-navigation'
+import { deferBrowserPageNavigation } from '../navigate/browser-page-deferred-navigation'
 import { keybindingMatchesAction } from '../../../../../shared/keybindings'
 import type {
   BrowserBackResult,
@@ -26,7 +27,9 @@ import type {
 export function useRemoteBrowserPageNavigation({
   browserTab,
   isActive,
-  addressBarInputRef,
+  stagedPage,
+  addressBarValue,
+  setAddressBarValueFromPage,
   lifecycle,
   runtimeWorktree,
   runtimeTarget,
@@ -40,7 +43,10 @@ export function useRemoteBrowserPageNavigation({
 }: {
   browserTab: BrowserPageState
   isActive: boolean
-  addressBarInputRef: React.RefObject<HTMLInputElement | null>
+  /** The host has not minted this page yet, so nothing here may be sent to the runtime. */
+  stagedPage: boolean
+  addressBarValue: string
+  setAddressBarValueFromPage: (value: string) => void
   lifecycle: RemoteBrowserStreamLifecycle
   runtimeWorktree: string
   runtimeTarget: () => RemoteBrowserRuntimeTarget | null
@@ -52,8 +58,6 @@ export function useRemoteBrowserPageNavigation({
   setPaneNotice: (notice: RemoteBrowserPaneNotice | null) => void
   setPaneBusy: (busy: boolean) => void
 }): {
-  addressBarValue: string
-  setAddressBarValue: (value: string) => void
   applyRemoteTabInfo: (tab: Pick<BrowserTabInfo, 'url' | 'title'>) => void
   scheduleRemoteTabInfoRefresh: (token: RemoteBrowserOperationToken, delayMs?: number) => void
   runRemoteNavigation: (
@@ -63,17 +67,9 @@ export function useRemoteBrowserPageNavigation({
   navigateToUrl: (url: string) => void
   submitAddressBar: () => void
 } {
-  const [addressBarValue, setAddressBarValue] = useState(toDisplayUrl(browserTab.url))
   const keybindings = useAppStore((state) => state.keybindings)
   const addBrowserHistoryEntry = useAppStore((state) => state.addBrowserHistoryEntry)
   const lastFiledHistoryRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (document.activeElement === addressBarInputRef.current) {
-      return
-    }
-    setAddressBarValue(toDisplayUrl(browserTab.url))
-  }, [addressBarInputRef, browserTab.url])
 
   const applyRemoteTabInfo = useCallback(
     (tab: Pick<BrowserTabInfo, 'url' | 'title'>): void => {
@@ -94,11 +90,9 @@ export function useRemoteBrowserPageNavigation({
         lastFiledHistoryRef.current = filing
         addBrowserHistoryEntry(safeUrl, title)
       }
-      if (document.activeElement !== addressBarInputRef.current) {
-        setAddressBarValue(toDisplayUrl(safeUrl))
-      }
+      setAddressBarValueFromPage(toDisplayUrl(safeUrl))
     },
-    [addBrowserHistoryEntry, addressBarInputRef, browserTab.id, onSetUrl, onUpdatePageState]
+    [addBrowserHistoryEntry, browserTab.id, onSetUrl, onUpdatePageState, setAddressBarValueFromPage]
   )
 
   const scheduleRemoteTabInfoRefresh = useCallback(
@@ -115,6 +109,17 @@ export function useRemoteBrowserPageNavigation({
     ) => {
       const target = runtimeTarget()
       if (!target) {
+        return
+      }
+      if (stagedPage) {
+        // Why: the runtime has no page under this id yet, so ensureRemotePage's browser.tabShow
+        // answers browser_tab_not_found — which reads as "the page is gone" and closes the tab the
+        // user is typing in. A goto is parked for whichever pane owns the page once it lands;
+        // history and reload have nothing to replay against a page with no history yet.
+        if (method === 'browser.goto' && url) {
+          deferBrowserPageNavigation(browserTab.id, url)
+          onUpdatePageState(browserTab.id, { loading: true, loadError: null })
+        }
         return
       }
       const operationToken = createRemoteOperationToken()
@@ -180,7 +185,8 @@ export function useRemoteBrowserPageNavigation({
       runtimeTarget,
       runtimeWorktree,
       setPaneBusy,
-      setPaneNotice
+      setPaneNotice,
+      stagedPage
     ]
   )
 
@@ -228,8 +234,6 @@ export function useRemoteBrowserPageNavigation({
   }
 
   return {
-    addressBarValue,
-    setAddressBarValue,
     applyRemoteTabInfo,
     scheduleRemoteTabInfoRefresh,
     runRemoteNavigation,
