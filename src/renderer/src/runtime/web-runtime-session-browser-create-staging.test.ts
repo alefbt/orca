@@ -226,6 +226,80 @@ describe('createWebRuntimeSessionBrowserTab optimistic staging', () => {
     expect(stagedBrowserWorkspaces(mocks)).toEqual([])
   })
 
+  // Why: re-staging a page the snapshot already published would hide it from persistence and
+  // suppress its stream, for a tab the user can see and is already using.
+  it('leaves a page the snapshot adopted mid-flight alone', async () => {
+    const runtimeCall = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        const state = mocks.getState()
+        const pageId = Object.keys(state.remoteBrowserPageHandlesByPageId)[0]!
+        state.remoteBrowserPageHandlesByPageId[pageId] = {
+          environmentId: ENVIRONMENT_ID,
+          remotePageId: 'host-minted-page'
+        }
+        return Promise.resolve({
+          id: 'create',
+          ok: true,
+          result: { browserPageId: 'host-minted-page' }
+        })
+      })
+      .mockResolvedValueOnce({ id: 'list', ok: true, result: makeSnapshot() })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    await expect(
+      createWebRuntimeSessionBrowserTab({
+        worktreeId: WORKTREE_ID,
+        environmentId: ENVIRONMENT_ID
+      })
+    ).resolves.toBe(true)
+
+    expect(stagedBrowserWorkspaces(mocks)).toEqual([
+      { workspaceId: 'staged-workspace-1', pageId: expect.any(String), staged: false }
+    ])
+    expect(mocks.setRemoteBrowserPageHandle).toHaveBeenCalledTimes(1)
+    expect(stagedBrowserTabMocks.closeBrowserTab).not.toHaveBeenCalled()
+  })
+
+  // Why: without browser.tab-create-known-id.v1 every create rehomes onto a host-minted id, and
+  // that is the path where a mixed-up mapping would silently rekey one click's tab onto another's.
+  it('keeps three rapid creates distinct when the host mints every page id', async () => {
+    let hostPageCounter = 0
+    const runtimeCall = vi.fn((request: { method: string }) => {
+      if (request.method !== 'browser.tabCreate') {
+        return Promise.resolve({ id: 'list', ok: true, result: makeSnapshot() })
+      }
+      hostPageCounter += 1
+      return Promise.resolve({
+        id: 'create',
+        ok: true,
+        result: { browserPageId: `host-page-${hostPageCounter}` }
+      })
+    })
+    vi.stubGlobal('window', { api: { runtimeEnvironments: { call: runtimeCall } } })
+
+    const creates = [1, 2, 3].map(() =>
+      createWebRuntimeSessionBrowserTab({
+        worktreeId: WORKTREE_ID,
+        environmentId: ENVIRONMENT_ID
+      })
+    )
+    await expect(Promise.all(creates)).resolves.toEqual([true, true, true])
+
+    const workspaces = stagedBrowserWorkspaces(mocks)
+    expect(workspaces.map((entry) => entry.workspaceId)).toEqual([
+      'staged-workspace-1',
+      'staged-workspace-2',
+      'staged-workspace-3'
+    ])
+    const state = mocks.getState()
+    const rehomedTo = workspaces.map(
+      (entry) => state.remoteBrowserPageHandlesByPageId[entry.pageId]?.remotePageId
+    )
+    expect(new Set(rehomedTo)).toEqual(new Set(['host-page-1', 'host-page-2', 'host-page-3']))
+    expect(stagedBrowserTabMocks.closeBrowserTab).not.toHaveBeenCalled()
+  })
+
   it('keeps three rapid creates as three distinct staged tabs', async () => {
     advertiseKnownPageId()
     const runtimeCall = vi.fn((request: { method: string; params: { page?: string } }) =>
