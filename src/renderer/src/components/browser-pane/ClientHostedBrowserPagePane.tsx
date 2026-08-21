@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
-import { Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { translate } from '@/i18n/i18n'
 import { useAppStore } from '@/store'
 import type {
   BrowserLoadError,
@@ -18,14 +16,12 @@ import { useBrowserClientHostedDownloadNotices } from './browser-client-hosted-d
 import { useBrowserClientHostedPopupNotices } from './browser-client-hosted-popup-notices'
 import { useBrowserClientHostedPermissionNotices } from './browser-client-hosted-permission-notices'
 import { useClientHostedBrowserIntroTour } from './use-client-hosted-browser-intro-tour'
-import {
-  ReopenBrowserPageOnServerButton,
-  reopenOnServerCaveat
-} from './ReopenBrowserPageOnServerButton'
+import { ClientHostedBrowserUnavailableNotice } from './client-hosted-browser-unavailable-notice'
 import BrowserFind from './assemble-chrome/BrowserFind'
 import { BrowserNavigationControlRow } from './assemble-chrome/browser-navigation-control-row'
 import { BrowserPageContextMenu } from './assemble-chrome/browser-page-context-menu'
 import { useBrowserPageChromeFocus } from './assemble-chrome/use-browser-page-chrome-focus'
+import { useBrowserAddressBarEditSession } from './assemble-chrome/use-browser-address-bar-edit-session'
 import { useBrowserPageFindShortcuts } from './assemble-chrome/use-browser-page-find-shortcuts'
 import { useWebviewGuestFocus } from './assemble-chrome/browser-page-guest-focus'
 import { RemoteRuntimeEgressIndicator } from './assemble-chrome/browser-egress-indicator'
@@ -37,6 +33,7 @@ import { resolveBrowserAddressBarSubmission } from './navigate/browser-address-b
 import { useBrowserPageReloadActions } from './navigate/use-browser-page-reload-actions'
 import { resolveBrowserWebviewLoadFailure } from './navigate/browser-webview-load-failure'
 import { resolveActiveBrowserLoadFailure } from './navigate/browser-load-failure-for-url'
+import { consumeBrowserPageDeferredNavigation } from './navigate/browser-page-deferred-navigation'
 import {
   getBrowserDisplayTitle,
   getOpenableExternalUrl,
@@ -79,7 +76,6 @@ export function ClientHostedBrowserPagePane({
   const activeLoadFailureRef = useRef<BrowserLoadError | null>(browserTab.loadError ?? null)
   const onUpdatePageStateRef = useRef(onUpdatePageState)
   const isActiveRef = useRef(isActive)
-  const [addressBarValue, setAddressBarValue] = useState(toDisplayUrl(browserTab.url))
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const updatePageStateFromGuest = useEffectEvent(onUpdatePageState)
@@ -103,7 +99,7 @@ export function ClientHostedBrowserPagePane({
   }, [browserTab.id, isActive, onUpdatePageState])
 
   const guestFocus = useWebviewGuestFocus(webviewRef)
-  const { keepAddressBarFocusRef } = useBrowserPageChromeFocus({
+  const { keepAddressBarFocusRef, startAddressBarFocusGrab } = useBrowserPageChromeFocus({
     browserTabId: browserTab.id,
     workspaceId,
     isActive,
@@ -111,6 +107,13 @@ export function ClientHostedBrowserPagePane({
     addressBarInputRef,
     guestFocus
   })
+  const { addressBarValue, setAddressBarValue, setAddressBarValueFromPage, addressBarEditSession } =
+    useBrowserAddressBarEditSession({
+      pageId: browserTab.id,
+      url: browserTab.url,
+      addressBarInputRef,
+      startAddressBarFocusGrab
+    })
   const zoom = useBrowserPageZoomFeedback(browserTab.id)
   const reload = useBrowserPageReloadActions({
     browserTab,
@@ -140,6 +143,34 @@ export function ClientHostedBrowserPagePane({
     showBrowserZoomFeedback: zoom.showBrowserZoomFeedback,
     reloadWebviewOrRecoverGuest: reload.reloadWebviewOrRecoverGuest
   })
+
+  const navigateToUrl = useCallback(
+    (value: string) => {
+      const submission = resolveBrowserAddressBarSubmission(value)
+      if (submission.status === 'invalid') {
+        onUpdatePageState(browserTab.id, { loadError: submission.loadError })
+        return
+      }
+      const webview = webviewRef.current
+      if (!webview) {
+        return
+      }
+      // Why: the store and the address bar must never hold a Kagi session token, and an optimistic
+      // title keeps the tab from reading "New Tab" until the guest reports one — as local does.
+      const browserModelUrl = redactKagiSessionToken(submission.url)
+      activeLoadFailureRef.current = null
+      setAddressBarValue(toDisplayUrl(browserModelUrl))
+      onUpdatePageState(browserTab.id, {
+        loading: true,
+        loadError: null,
+        title: getBrowserDisplayTitle(browserModelUrl, browserModelUrl)
+      })
+      // Why: loadURL rejects on any failed navigation; did-fail-load owns error reporting.
+      void webview.loadURL(submission.url).catch(() => {})
+    },
+    [browserTab.id, onUpdatePageState, setAddressBarValue]
+  )
+  const runDeferredNavigation = useEffectEvent(navigateToUrl)
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -208,7 +239,7 @@ export function ClientHostedBrowserPagePane({
       // Why: the address bar's suggestions read the client's shared URL history, so a page
       // hosted here has to file its navigations there like a local guest does.
       recordHistoryFromGuest(metadata.url, getBrowserDisplayTitle(webview.getTitle(), metadata.url))
-      setAddressBarValue(toDisplayUrl(metadata.url))
+      setAddressBarValueFromPage(toDisplayUrl(metadata.url))
     }
     const onStart = (): void => {
       activeLoadFailureRef.current = null
@@ -232,6 +263,12 @@ export function ClientHostedBrowserPagePane({
     webview.addEventListener('page-title-updated', syncNavigation)
     webview.addEventListener('did-fail-load', onFailLoad)
     syncNavigation()
+    // Why: the user pressed Enter while this page was still an optimistic stage, so the navigation
+    // was parked rather than sent to a host page that did not exist yet. The guest exists now.
+    const deferredUrl = consumeBrowserPageDeferredNavigation(browserTab.id)
+    if (deferredUrl) {
+      runDeferredNavigation(deferredUrl)
+    }
     return () => {
       webview.removeEventListener('did-start-loading', onStart)
       webview.removeEventListener('did-stop-loading', syncNavigation)
@@ -250,7 +287,8 @@ export function ClientHostedBrowserPagePane({
     browserHostClientId,
     browserHostGeneration,
     pageHostGeneration,
-    runtimeEnvironmentId
+    runtimeEnvironmentId,
+    setAddressBarValueFromPage
   ])
 
   useEffect(() => {
@@ -259,37 +297,6 @@ export function ClientHostedBrowserPagePane({
       webviewRef.current?.focus()
     }
   }, [isActive, keepAddressBarFocusRef])
-
-  useEffect(() => {
-    setAddressBarValue(toDisplayUrl(browserTab.url))
-  }, [browserTab.url])
-
-  const navigateToUrl = useCallback(
-    (value: string) => {
-      const submission = resolveBrowserAddressBarSubmission(value)
-      if (submission.status === 'invalid') {
-        onUpdatePageState(browserTab.id, { loadError: submission.loadError })
-        return
-      }
-      const webview = webviewRef.current
-      if (!webview) {
-        return
-      }
-      // Why: the store and the address bar must never hold a Kagi session token, and an optimistic
-      // title keeps the tab from reading "New Tab" until the guest reports one — as local does.
-      const browserModelUrl = redactKagiSessionToken(submission.url)
-      activeLoadFailureRef.current = null
-      setAddressBarValue(toDisplayUrl(browserModelUrl))
-      onUpdatePageState(browserTab.id, {
-        loading: true,
-        loadError: null,
-        title: getBrowserDisplayTitle(browserModelUrl, browserModelUrl)
-      })
-      // Why: loadURL rejects on any failed navigation; did-fail-load owns error reporting.
-      void webview.loadURL(submission.url).catch(() => {})
-    },
-    [browserTab.id, onUpdatePageState]
-  )
 
   const showFailureOverlay = !attachmentError && Boolean(browserTab.loadError)
   // Why: the failure is about the URL that failed, not whatever page is still loaded — feeding
@@ -336,6 +343,7 @@ export function ClientHostedBrowserPagePane({
           onAddressBarChange={setAddressBarValue}
           onSubmitAddressBar={() => navigateToUrl(addressBarValue)}
           addressBarInputRef={addressBarInputRef}
+          addressBarEditSession={addressBarEditSession}
           reloadLabel={reload.reloadButtonLabel}
           addressBarLeadingIcon={
             <RemoteRuntimeEgressIndicator
@@ -381,31 +389,11 @@ export function ClientHostedBrowserPagePane({
           />
         ) : null}
         {attachmentError ? (
-          <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-            <div className="flex max-w-sm flex-col items-center gap-2">
-              <Globe className="size-5 text-muted-foreground" />
-              <div className="text-sm font-medium text-foreground">
-                {translate(
-                  'browser.clientHosted.unavailableTitle',
-                  'Client-hosted browser unavailable'
-                )}
-              </div>
-              <div className="text-xs leading-5 text-muted-foreground">
-                {translate(
-                  'browser.clientHosted.unavailableDescription',
-                  'This page is attached to a different desktop or is no longer available.'
-                )}
-              </div>
-              <div className="text-xs leading-5 text-muted-foreground">
-                {reopenOnServerCaveat()}
-              </div>
-              <ReopenBrowserPageOnServerButton
-                environmentId={runtimeEnvironmentId}
-                worktreeId={worktreeId}
-                lastCommittedUrl={browserTab.url}
-              />
-            </div>
-          </div>
+          <ClientHostedBrowserUnavailableNotice
+            runtimeEnvironmentId={runtimeEnvironmentId}
+            worktreeId={worktreeId}
+            lastCommittedUrl={browserTab.url}
+          />
         ) : null}
       </div>
     </div>

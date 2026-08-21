@@ -5,7 +5,9 @@ import type { BrowserPage as BrowserPageState } from '../../../../../shared/brow
 import { runtimeEnvironmentSupportsCapability } from '@/runtime/runtime-rpc-client'
 import { openWorkspaceBrowserTab } from '@/lib/workspace-browser-tab-open'
 import { useBrowserPageChromeFocus } from '../assemble-chrome/use-browser-page-chrome-focus'
+import { useBrowserAddressBarEditSession } from '../assemble-chrome/use-browser-address-bar-edit-session'
 import { useElementGuestFocus } from '../assemble-chrome/browser-page-guest-focus'
+import { consumeBrowserPageDeferredNavigation } from '../navigate/browser-page-deferred-navigation'
 import { useMarkupMode, type MarkupCaptureContext } from '../annotate/useMarkupMode'
 import { deliverMarkupToClipboard } from '../annotate/markup-clipboard-delivery'
 import {
@@ -60,6 +62,21 @@ export function RemoteBrowserPagePane({
   // Why: the screencast <img> only exists once a frame lands, so before the first one the
   // viewport is the only place guest focus can go.
   const guestFocus = useElementGuestFocus(imageRef, remoteViewportRef)
+  const { startAddressBarFocusGrab } = useBrowserPageChromeFocus({
+    browserTabId: browserTab.id,
+    workspaceId,
+    isActive,
+    chromeShortcutScope,
+    addressBarInputRef,
+    guestFocus
+  })
+  const { addressBarValue, setAddressBarValue, setAddressBarValueFromPage, addressBarEditSession } =
+    useBrowserAddressBarEditSession({
+      pageId: browserTab.id,
+      url: browserTab.url,
+      addressBarInputRef,
+      startAddressBarFocusGrab
+    })
   // Pane-owned notices, split by what they are ABOUT, because that decides who outranks whom:
   //
   //   'direct'      — feedback on what the user just did (URL validation). Always shown: it is the
@@ -77,6 +94,7 @@ export function RemoteBrowserPagePane({
   const remotePageHandle = useAppStore(
     (s) => s.remoteBrowserPageHandlesByPageId[browserTab.id] ?? null
   )
+  const stagedPage = remotePageHandle?.staged === true
 
   // Why: runtimes predating browser.certificate-trust.v1 can't honor a proceed request, so hide "Proceed Anyway" until support is advertised.
   const [remoteCertificateTrustSupported, setRemoteCertificateTrustSupported] = useState(false)
@@ -153,19 +171,16 @@ export function RemoteBrowserPagePane({
   // message that explains why — nor can the reconnect control depend on one of them being present.
   // A stopped stream delivers no frames that could clear paneBusy, so it must force busy off.
   // A staged page has no stream to report on yet; its create is the thing still in progress.
-  const busy =
-    remotePageHandle?.staged === true
-      ? true
-      : streamStatus.kind === 'stopped'
-        ? false
-        : paneBusy || isRemoteBrowserStreamBusy(streamStatus)
+  const busy = stagedPage
+    ? true
+    : streamStatus.kind === 'stopped'
+      ? false
+      : paneBusy || isRemoteBrowserStreamBusy(streamStatus)
   const streamNotice = remoteBrowserStreamNotice(streamStatus)
   const remoteError =
     paneNotice?.kind === 'direct' ? paneNotice.text : (streamNotice ?? paneNotice?.text ?? null)
 
   const {
-    addressBarValue,
-    setAddressBarValue,
     applyRemoteTabInfo,
     scheduleRemoteTabInfoRefresh,
     runRemoteNavigation,
@@ -174,7 +189,9 @@ export function RemoteBrowserPagePane({
   } = useRemoteBrowserPageNavigation({
     browserTab,
     isActive,
-    addressBarInputRef,
+    stagedPage,
+    addressBarValue,
+    setAddressBarValueFromPage,
     lifecycle,
     runtimeWorktree,
     runtimeTarget,
@@ -187,14 +204,18 @@ export function RemoteBrowserPagePane({
     setPaneBusy
   })
 
-  useBrowserPageChromeFocus({
-    browserTabId: browserTab.id,
-    workspaceId,
-    isActive,
-    chromeShortcutScope,
-    addressBarInputRef,
-    guestFocus
-  })
+  // Why: a URL submitted against a staged page was parked rather than sent to a host page that did
+  // not exist. This pane keeps the page when the host is headless, so it owns the replay.
+  useEffect(() => {
+    if (stagedPage) {
+      return
+    }
+    const deferredUrl = consumeBrowserPageDeferredNavigation(browserTab.id)
+    if (deferredUrl) {
+      navigateToUrl(deferredUrl)
+    }
+  }, [browserTab.id, navigateToUrl, stagedPage])
+
   useRemoteBrowserPageChromeChords({
     chromeShortcutScope,
     workspaceId,
@@ -217,7 +238,7 @@ export function RemoteBrowserPagePane({
     browserPageId: browserTab.id,
     isActive,
     lifecycle,
-    stagedPage: remotePageHandle?.staged === true,
+    stagedPage,
     runtimeWorktree,
     runtimeTarget,
     remoteViewportRef,
@@ -358,6 +379,7 @@ export function RemoteBrowserPagePane({
         onSubmitAddressBar={submitAddressBar}
         onNavigateToUrl={navigateToUrl}
         addressBarInputRef={addressBarInputRef}
+        addressBarEditSession={addressBarEditSession}
         busy={busy}
         loading={browserTab.loading}
         markup={markup}

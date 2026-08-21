@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
 import { BrowserNavigationControlRow } from '../assemble-chrome/browser-navigation-control-row'
+import type { BrowserAddressBarEditSessionBinding } from '../assemble-chrome/use-browser-address-bar-edit-session'
 import { RemoteRuntimeEgressIndicator } from '../assemble-chrome/browser-egress-indicator'
 import { MarkupDrawButton } from '../annotate/MarkupDrawButton'
 import type { MarkupModeController } from '../annotate/useMarkupMode'
@@ -14,6 +15,7 @@ export function RemoteBrowserPageToolbar({
   onSubmitAddressBar,
   onNavigateToUrl,
   addressBarInputRef,
+  addressBarEditSession,
   busy,
   loading,
   markup,
@@ -29,6 +31,7 @@ export function RemoteBrowserPageToolbar({
   onSubmitAddressBar: () => void
   onNavigateToUrl: (url: string) => void
   addressBarInputRef: React.RefObject<HTMLInputElement | null>
+  addressBarEditSession: BrowserAddressBarEditSessionBinding
   busy: boolean
   loading: boolean
   markup: MarkupModeController
@@ -55,6 +58,7 @@ export function RemoteBrowserPageToolbar({
       onAddressBarChange={onAddressBarChange}
       onSubmitAddressBar={onSubmitAddressBar}
       addressBarInputRef={addressBarInputRef}
+      addressBarEditSession={addressBarEditSession}
       addressBarLeadingIcon={
         <RemoteRuntimeEgressIndicator
           runtimeEnvironmentId={runtimeEnvironmentId}
