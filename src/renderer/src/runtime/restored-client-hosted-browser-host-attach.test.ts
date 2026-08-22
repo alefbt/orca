@@ -78,26 +78,69 @@ describe('ensureBrowserClientHostsForRestoredPages', () => {
     expect(preparedEnvironmentIds()).toEqual([])
   })
 
-  it('does not start the same environment twice across calls', async () => {
+  // Why: the marker is what ends the retries — adoption spends it once the host republishes the
+  // page, and an environment with none left must not be dialled again.
+  it('starts no host once adoption has spent the restored markers', async () => {
+    await ensureBrowserClientHostsForRestoredPages(
+      handles({ 'page-1': { environmentId: 'env-1', clientHosted: true } })
+    )
+    prepareBrowserClientHostPlacement.mockClear()
+
+    await ensureBrowserClientHostsForRestoredPages(
+      handles({ 'page-1': { environmentId: 'env-1' } })
+    )
+
+    expect(preparedEnvironmentIds()).toEqual([])
+  })
+
+  it('does not stack a second preparation on top of one still in flight', async () => {
+    let settle = (): void => {}
+    prepareBrowserClientHostPlacement.mockImplementation(
+      () => new Promise((resolve) => (settle = () => resolve({ kind: 'server' as const })))
+    )
     const restored = handles({ 'page-1': { environmentId: 'env-1', clientHosted: true } })
+
+    const first = ensureBrowserClientHostsForRestoredPages(restored)
     await ensureBrowserClientHostsForRestoredPages(restored)
-    await ensureBrowserClientHostsForRestoredPages(restored)
+    settle()
+    await first
 
     expect(preparedEnvironmentIds()).toEqual(['env-1'])
   })
 
   // Why: this runs inside the startup chain, and a rejected preparation there would abort hydration
   // and boot the app in degraded no-save mode.
-  it('swallows a failed preparation without retrying it', async () => {
+  it('swallows a failed preparation instead of rejecting into hydration', async () => {
     prepareBrowserClientHostPlacement.mockRejectedValue(new Error('runtime_manually_disconnected'))
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const restored = handles({ 'page-1': { environmentId: 'env-1', clientHosted: true } })
 
     await expect(ensureBrowserClientHostsForRestoredPages(restored)).resolves.toBeUndefined()
-    await ensureBrowserClientHostsForRestoredPages(restored)
 
     expect(preparedEnvironmentIds()).toEqual(['env-1'])
     expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  // Why: reachability is observed from the status slice, which can run before the browser slice
+  // has published any handles at all.
+  it('starts no host for a state with no handle map yet', async () => {
+    await expect(ensureBrowserClientHostsForRestoredPages({})).resolves.toBeUndefined()
+
+    expect(preparedEnvironmentIds()).toEqual([])
+  })
+
+  // Why: hydration can ask before the environment is reachable, and that attempt has to be
+  // retryable or the restored tab never comes back for the rest of the session.
+  it('retries an environment whose preparation failed when it is asked again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    prepareBrowserClientHostPlacement.mockRejectedValueOnce(new Error('runtime_unreachable'))
+    const restored = handles({ 'page-1': { environmentId: 'env-1', clientHosted: true } })
+
+    await ensureBrowserClientHostsForRestoredPages(restored)
+    await ensureBrowserClientHostsForRestoredPages(restored)
+
+    expect(preparedEnvironmentIds()).toEqual(['env-1', 'env-1'])
     warn.mockRestore()
   })
 })

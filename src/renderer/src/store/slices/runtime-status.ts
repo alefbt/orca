@@ -16,6 +16,7 @@ import {
 import { reconcileCatalogRows } from './repo-identity-reconcile'
 import { createRuntimeStatusHydration } from './runtime-status-hydration'
 import { refreshRuntimeEnvironmentStatus } from './runtime-status-refresh'
+import { ensureBrowserClientHostsForRestoredPages } from '@/runtime/restored-client-hosted-browser-host-attach'
 
 /** Live status for one saved runtime environment, as last observed by the
  * renderer. `status === null` records a probe that failed or timed out so the
@@ -295,6 +296,11 @@ export const createRuntimeStatusSlice: StateCreator<AppState, [], [], RuntimeSta
       // Why: setRuntimeEnvironmentStatus drops any stale compat failure on a non-null
       // (reachable) status, so a recovered host's reuse-flagged refetches re-probe.
       get().setRuntimeEnvironmentStatus(environmentId, { status, checkedAt: Date.now() })
+      if (status) {
+        // Why here: hydration can ask before the environment is reachable, and a restored
+        // client-hosted page only comes back once this desktop attaches as its host.
+        void ensureBrowserClientHostsForRestoredPages(get())
+      }
     }),
 
   hydrateRuntimeEnvironmentStatuses: createRuntimeStatusHydration({
