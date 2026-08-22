@@ -107,19 +107,46 @@ describe('publishCreatedBrowserSessionTab', () => {
       client: {
         activatesBridgeTab: false,
         marksSessionTabFocus: true,
-        notifiesSessionTabsChanged: true
+        notifiesSessionTabsChanged: true,
+        hostRowSource: 'session-notify'
       },
       offscreen: {
         activatesBridgeTab: true,
         marksSessionTabFocus: true,
-        notifiesSessionTabsChanged: false
+        notifiesSessionTabsChanged: false,
+        hostRowSource: 'none'
       },
       renderer: {
         activatesBridgeTab: true,
         marksSessionTabFocus: false,
-        notifiesSessionTabsChanged: false
+        notifiesSessionTabsChanged: false,
+        hostRowSource: 'create-ipc'
       }
     })
+  })
+
+  // Why: `session-notify` is not a free-standing choice — the host row rides the very announcement
+  // `notifiesSessionTabsChanged` gates, so silencing that flag would delete the row with no other
+  // test noticing. Pin the coupling, not just the two values.
+  it('gives every session-notify placement the announcement its host row rides on', () => {
+    for (const placementKind of BROWSER_TAB_CREATE_PLACEMENT_KINDS) {
+      const rules = BROWSER_TAB_CREATE_PUBLICATION_RULES[placementKind]
+      if (rules.hostRowSource === 'session-notify') {
+        expect(
+          rules.notifiesSessionTabsChanged,
+          `${placementKind} sources its host row from the session-tabs announcement`
+        ).toBe(true)
+      }
+    }
+  })
+
+  it('declares a host row source for every placement kind', () => {
+    for (const placementKind of BROWSER_TAB_CREATE_PLACEMENT_KINDS) {
+      expect(
+        ['create-ipc', 'session-notify', 'none'],
+        `${placementKind} must say where its host tab row comes from`
+      ).toContain(BROWSER_TAB_CREATE_PUBLICATION_RULES[placementKind].hostRowSource)
+    }
   })
 
   it.each(BROWSER_TAB_CREATE_PLACEMENT_KINDS)(

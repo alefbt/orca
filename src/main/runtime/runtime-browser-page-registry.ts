@@ -12,6 +12,11 @@ export type RuntimeBrowserClientPage = Readonly<{
   browserProfileId: string
   executionHostKey: string
   placement: RuntimeBrowserClientPlacement
+  /**
+   * The paired device that asked for this page. Survives the lease, which the placement does not:
+   * a retained page has no lease left to look its host's name up through.
+   */
+  pairedDeviceId?: string
   url: string
   title: string
   loading: boolean
@@ -33,7 +38,10 @@ type RuntimeBrowserClientPageInput = Pick<
   | 'active'
 > &
   Partial<
-    Pick<RuntimeBrowserClientPage, 'title' | 'canGoBack' | 'canGoForward' | 'metadataRevision'>
+    Pick<
+      RuntimeBrowserClientPage,
+      'pairedDeviceId' | 'title' | 'canGoBack' | 'canGoForward' | 'metadataRevision'
+    >
   >
 
 type RuntimeBrowserPageUpdate = Partial<

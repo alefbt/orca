@@ -1597,6 +1597,7 @@ export class RuntimeBrowserCommands {
         browserProfileId,
         executionHostKey: browserNetworkExecutionHostKey(executionHost),
         placement: created.placement,
+        pairedDeviceId: caller.pairedDeviceId,
         url: 'about:blank',
         loading: url !== 'about:blank',
         active: browserTabCreateClientPageStartsActive(params.activate)

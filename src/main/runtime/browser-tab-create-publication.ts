@@ -33,10 +33,22 @@ export type BrowserTabCreatePublication = {
   targetGroupId?: string
 }
 
+/**
+ * Where the HOST desktop's own tab row for a placement comes from. The host renderer owns its tab
+ * model, so a placement whose page never reaches that renderer has to name another source or it is
+ * invisible on the host — which is exactly what `client` was before it declared `session-notify`.
+ *
+ * `create-ipc`: the create round-trips through the renderer, which mints the row itself.
+ * `session-notify`: main pushes a derived, ephemeral row off the session-tabs announcement.
+ * `none`: no host renderer exists for this placement to appear in.
+ */
+export type BrowserTabCreateHostRowSource = 'create-ipc' | 'session-notify' | 'none'
+
 type BrowserTabCreatePublicationRules = {
   activatesBridgeTab: boolean
   marksSessionTabFocus: boolean
   notifiesSessionTabsChanged: boolean
+  hostRowSource: BrowserTabCreateHostRowSource
 }
 
 // Why: this table is the only place a placement may differ in post-create bookkeeping. A new
@@ -50,21 +62,25 @@ export const BROWSER_TAB_CREATE_PUBLICATION_RULES: Record<
     // Why: client pages are driven over the host lease, so no bridge-registered WebContents exists.
     activatesBridgeTab: false,
     marksSessionTabFocus: true,
-    notifiesSessionTabsChanged: true
+    notifiesSessionTabsChanged: true,
+    hostRowSource: 'session-notify'
   },
   offscreen: {
     activatesBridgeTab: true,
     marksSessionTabFocus: true,
     // Why: the offscreen snapshot is republished by hydration and by navigation; a bare create
     // has nothing new to announce until one of those runs.
-    notifiesSessionTabsChanged: false
+    notifiesSessionTabsChanged: false,
+    // Why: the offscreen backend only exists when there is no host renderer to show a row in.
+    hostRowSource: 'none'
   },
   renderer: {
     activatesBridgeTab: true,
     // Why: the renderer owns its own tab model — `activate` rides the create IPC and the renderer
     // publishes the resulting session snapshot itself.
     marksSessionTabFocus: false,
-    notifiesSessionTabsChanged: false
+    notifiesSessionTabsChanged: false,
+    hostRowSource: 'create-ipc'
   }
 }
 
