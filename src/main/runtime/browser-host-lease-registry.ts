@@ -75,8 +75,9 @@ export class BrowserHostLeaseRegistry {
        */
       onClientPageReleased?: (browserPageId: string) => void
       /**
-       * Called when a lease fence retires a client page. Nothing on the client side will ever
-       * acknowledge that page, so the runtime's own record of it (its tab) has to be dropped here.
+       * Called when a lease fence takes a client page's placement away. The page itself outlives
+       * the host that placed it, so this hands the runtime its record back to retain rather than
+       * to drop -- a host returning under the same identity recovers it from there.
        */
       onClientPageFenced?: (browserPageId: string, placement: RuntimeBrowserClientPlacement) => void
     }

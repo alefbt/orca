@@ -1,7 +1,7 @@
 import { releaseBrowserClientDownloadTransfersForPage } from './browser-client-download-transfer-store'
 import { BrowserHostLeaseRegistry } from './browser-host-lease-registry'
 import {
-  releaseRuntimeBrowserClientPageRecord,
+  retainRuntimeBrowserClientPageRecord,
   type RuntimeBrowserClientPageReleaseHost
 } from './runtime-browser-client-page-release'
 
@@ -20,7 +20,7 @@ export function getBrowserHostLeaseRegistry(
         })
       },
       onClientPageFenced: (browserPageId, placement) => {
-        releaseRuntimeBrowserClientPageRecord(runtime, browserPageId, placement)
+        retainRuntimeBrowserClientPageRecord(runtime, browserPageId, placement)
       }
     })
     registries.set(runtime, registry)
