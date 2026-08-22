@@ -7,6 +7,11 @@ export type ClientHostedBrowserRowSources = {
   resolveDeviceName(pairedDeviceId: string): string | null
 }
 
+/**
+ * Note for anyone widening the row: `active` is deliberately not projected. `listPages` normalizes
+ * it against the global active page only on the unscoped call, so a scoped publish and the
+ * unscoped hydration snapshot can legitimately disagree about it for the same page.
+ */
 export function projectClientHostedBrowserRows(
   pages: readonly RuntimeBrowserClientPage[],
   sources: ClientHostedBrowserRowSources
