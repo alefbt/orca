@@ -50,6 +50,20 @@ describe('fenced client page retention', () => {
     await expect(host.whenFenced).resolves.toBe('released')
   })
 
+  // Why the fixture has to publish a loading page: every other case here publishes a settled one,
+  // so the republish that settles it reads the same as no republish at all.
+  it('settles a retained page that was still loading when its host quit', () => {
+    const runtime = createRuntime()
+    const host = attachHost(runtime, 'host-a')
+    const placement = placeClientPage(runtime, 'page-a', 'host-a')
+    publishPage(runtime, 'page-a', placement, { loading: true })
+
+    host.release()
+
+    // Nothing can drive the page any more, so a spinner left standing would never resolve.
+    expect(getRuntimeBrowserPageRegistry(runtime).getPage('page-a')?.loading).toBe(false)
+  })
+
   it('leaves pages hosted by a live lease alone', () => {
     const runtime = createRuntime()
     const fenced = attachHost(runtime, 'host-a')
@@ -195,7 +209,8 @@ function placeClientPage(
 function publishPage(
   runtime: FencedPageReleaseRuntime,
   browserPageId: string,
-  placement: RuntimeBrowserClientPlacement
+  placement: RuntimeBrowserClientPlacement,
+  options: { loading?: boolean } = {}
 ): void {
   getRuntimeBrowserPageRegistry(runtime).publishClientPage({
     browserPageId,
@@ -204,7 +219,7 @@ function publishPage(
     executionHostKey: 'native:runtime-a:1',
     placement,
     url: 'https://example.internal/',
-    loading: false,
+    loading: options.loading ?? false,
     active: false
   })
 }
