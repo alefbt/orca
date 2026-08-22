@@ -1,4 +1,6 @@
 import { useCallback } from 'react'
+import { toast } from 'sonner'
+import { translate } from '@/i18n/i18n'
 import { useAppStore } from '../../store'
 import type { ClientHostedBrowserRow } from '../../../../shared/client-hosted-browser-rows'
 import {
@@ -64,6 +66,14 @@ export default function ClientHostedBrowserTabRows({
               worktreeId,
               browserPageId: row.browserPageId
             }).catch((error: unknown) => {
+              // Why a toast: this row is the only handle on a page the host does not render, so a
+              // refusal that only reaches the console leaves it sitting there as a missed click.
+              toast.error(
+                translate(
+                  'browser.clientHosted.hostRowCloseFailed',
+                  "Couldn't close this page. The device hosting it may be busy — try again."
+                )
+              )
               console.error('Failed to close client-hosted browser page:', error)
             })
           }}

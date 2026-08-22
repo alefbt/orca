@@ -52,6 +52,7 @@
       "hostPaneOfflineDescription": "This page stays listed so you can close it from here. It will come back when the device reconnects.",
       "hostPaneDescription": "This page renders on the paired desktop that opened it, so there is nothing to display here.",
       "hostRowClose": "Close hosted page",
+      "hostRowCloseFailed": "Couldn't close this page. The device hosting it may be busy — try again.",
       "hostRowOfflineNamed": "Offline — was hosted on {{device}}",
       "hostRowOffline": "Offline — the device hosting it quit",
       "hostRowNamed": "Hosted on {{device}}",
