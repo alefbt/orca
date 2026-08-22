@@ -115,6 +115,9 @@ import {
 
 const WEB_SESSION_GROUP_PREFIX = 'web-session-tabs:'
 export const WEB_SESSION_TABS_VISIBILITY_RESUME_STAGGER_MS = 100
+/** Anything gating on a host answer must outlast this, or it gives up while a reply
+ *  is still in flight. */
+export const WEB_SESSION_TABS_RPC_TIMEOUT_MS = 15_000
 
 type SessionTabsStreamEvent =
   | (RuntimeMobileSessionTabsResult & { type: 'snapshot' | 'updated' })
@@ -3875,7 +3878,7 @@ function loadInitialWebSessionTabs(
       selector: environmentId,
       method: 'session.tabs.listAll',
       params: {},
-      timeoutMs: 15_000,
+      timeoutMs: WEB_SESSION_TABS_RPC_TIMEOUT_MS,
       expectedEnvironmentPairingRevision
     })
     .then(async (response: RuntimeRpcResponse<unknown>) => {
@@ -4490,7 +4493,7 @@ export function useWebSessionTabsSync(): void {
               selector: environmentId,
               method: 'session.tabs.subscribeAll',
               params: {},
-              timeoutMs: 15_000,
+              timeoutMs: WEB_SESSION_TABS_RPC_TIMEOUT_MS,
               expectedEnvironmentPairingRevision
             },
             {
@@ -4889,7 +4892,7 @@ export function useWebSessionTabsSync(): void {
               selector: environmentId,
               method: 'session.tabs.subscribe',
               params: { worktree: toRuntimeWorktreeSelector(activeWorktreeId) },
-              timeoutMs: 15_000,
+              timeoutMs: WEB_SESSION_TABS_RPC_TIMEOUT_MS,
               expectedEnvironmentPairingRevision
             },
             {
