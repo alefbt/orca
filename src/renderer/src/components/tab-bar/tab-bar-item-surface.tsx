@@ -11,6 +11,7 @@ import type { TabDragItemData } from '../tab-group/useTabDragSplit'
 import { getTabDragLabel, type TabBarItem } from './tab-bar-item-model'
 import type { TabBarProps } from './tab-bar-props'
 import type { TabBarRuntimeModel } from './use-tab-bar-runtime-model'
+import { clearClientHostedBrowserRowSelection } from '@/lib/pane-manager/client-hosted-browser-row-state'
 
 export function renderTabBarItems({
   items,
@@ -62,6 +63,16 @@ export function renderTabBarItems({
     toggleTabViewMode,
     statusByRelativePath
   } = runtime
+
+  // Why: this is the strip's single activation fan-out, so retiring a client-hosted placeholder
+  // here covers every row kind — including re-clicking the tab that was already active, which the
+  // group's activeTabId never moves for.
+  function activateRealTab<TArg>(activate: ((arg: TArg) => void) | undefined): (arg: TArg) => void {
+    return (arg) => {
+      clearClientHostedBrowserRowSelection()
+      activate?.(arg)
+    }
+  }
 
   return items.map((item, index) => {
     const dragData: TabDragItemData = {
@@ -119,7 +130,7 @@ export function renderTabBarItems({
           }
           isPinned={item.isPinned}
           isExpanded={expandedPaneByTabId[item.id] === true}
-          onActivate={onActivate}
+          onActivate={activateRealTab(onActivate)}
           onClose={onClose}
           onCloseOthers={onCloseOthers}
           onCloseToRight={onCloseToRight}
@@ -144,7 +155,7 @@ export function renderTabBarItems({
           hasTabsToRight={index < items.length - 1}
           hasTabsToLeft={index > 0}
           tabCount={items.length}
-          onActivate={() => onActivateBrowserTab?.(item.id)}
+          onActivate={() => activateRealTab(onActivateBrowserTab)(item.id)}
           onClose={() => onCloseBrowserTab?.(item.id)}
           onCloseOthers={() => onCloseOthers(item.id)}
           onCloseToRight={() => onCloseToRight(item.id)}
@@ -184,7 +195,7 @@ export function renderTabBarItems({
           hasTabsToLeft={index > 0}
           tabCount={items.length}
           statusByRelativePath={statusByRelativePath}
-          onActivate={() => onActivateFile?.(item.id)}
+          onActivate={() => activateRealTab(onActivateFile)(item.id)}
           onClose={() => onCloseFile?.(item.id)}
           onCloseOthers={() => onCloseOthers(item.id)}
           onCloseToRight={() => onCloseToRight(item.id)}
@@ -210,7 +221,7 @@ export function renderTabBarItems({
         hasTabsToLeft={index > 0}
         tabCount={items.length}
         statusByRelativePath={statusByRelativePath}
-        onActivate={() => onActivateFile?.(item.id)}
+        onActivate={() => activateRealTab(onActivateFile)(item.id)}
         onClose={() => onCloseFile?.(item.id)}
         onCloseOthers={() => onCloseOthers(item.id)}
         onCloseToRight={() => onCloseToRight(item.id)}

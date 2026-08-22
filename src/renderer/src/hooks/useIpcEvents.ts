@@ -85,6 +85,11 @@ import {
   hydrateBrowserDrivers,
   setDriverForBrowserPage
 } from '@/lib/pane-manager/browser-mobile-driver-state'
+import {
+  applyClientHostedBrowserRows,
+  hydrateClientHostedBrowserRows
+} from '@/lib/pane-manager/client-hosted-browser-row-state'
+import type { ClientHostedBrowserRowsEvent } from '../../../shared/client-hosted-browser-rows'
 import { destroyPersistentWebview } from '@/components/browser-pane/host-guest/webview-registry'
 import { destroyWorkspaceWebviews } from '@/store/slices/browser-webview-cleanup'
 import { closeBrowserWorkspaceTabOnHosts } from '@/runtime/browser-workspace-tab-close'
@@ -3913,6 +3918,50 @@ export function useIpcEvents(): void {
         setDriverForBrowserPage(event.browserPageId, event.driver)
       })
     )
+
+    // Why: no isRuntimeEnvironmentActive guard, unlike the driver channels above. These rows
+    // describe pages a paired client renders for THIS runtime's own worktrees; pointing the window
+    // at a remote environment does not make them someone else's, and dropping them would leave the
+    // host with an uncloseable page it cannot see. Hydration below is unguarded for the same reason.
+    let clientHostedRowsHydrated = false
+    const pendingClientHostedRowEvents: ClientHostedBrowserRowsEvent[] = []
+    const settleClientHostedRowHydration = (): void => {
+      clientHostedRowsHydrated = true
+      for (const event of pendingClientHostedRowEvents) {
+        applyClientHostedBrowserRows(event)
+      }
+      pendingClientHostedRowEvents.length = 0
+    }
+    unsubs.push(
+      window.api.runtime.onClientHostedBrowserRowsChanged((event) => {
+        // Why: subscribe before the snapshot round trip and buffer, or the older snapshot
+        // overwrites a page created while it was in flight.
+        if (!clientHostedRowsHydrated) {
+          pendingClientHostedRowEvents.push(event)
+          while (pendingClientHostedRowEvents.length > MAX_PENDING_MOBILE_STATE_EVENTS) {
+            pendingClientHostedRowEvents.shift()
+          }
+          return
+        }
+        applyClientHostedBrowserRows(event)
+      })
+    )
+    void window.api.runtime
+      .getClientHostedBrowserRows()
+      .then((events) => {
+        if (mobileStateHydrationDisposed) {
+          return
+        }
+        hydrateClientHostedBrowserRows(events)
+        settleClientHostedRowHydration()
+      })
+      .catch((error: unknown) => {
+        if (mobileStateHydrationDisposed) {
+          return
+        }
+        console.error('Failed to hydrate client-hosted browser rows:', error)
+        settleClientHostedRowHydration()
+      })
 
     // Why: subscribe before the snapshot round trip and buffer live events; otherwise an older snapshot could overwrite a newer live lock and hide the overlay.
     if (!isRuntimeEnvironmentActive()) {

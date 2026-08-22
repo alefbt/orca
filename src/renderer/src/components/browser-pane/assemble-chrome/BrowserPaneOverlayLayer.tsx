@@ -9,6 +9,12 @@ import type { BrowserChromeShortcutScope } from '../describe-page/browser-page-t
 import { tabGroupBodyAnchorName } from '../../tab-group/tab-group-body-anchor'
 import { useBrowserAutomationVisibilityForAny } from '../host-guest/browser-automation-visibility'
 import { useBrowserMobileDriverForAny } from '@/lib/pane-manager/browser-mobile-driver-state'
+import {
+  isClientHostedBrowserRowSelectionLive,
+  useClientHostedBrowserRowSelection,
+  useClientHostedBrowserRows
+} from '@/lib/pane-manager/client-hosted-browser-row-state'
+import { ClientHostedBrowserHostRowPane } from '../client-hosted-browser-host-row-pane'
 
 // Why: Electron <webview> destroys its guest on DOM reparent, so BrowserPanes render at worktree level and moving a tab between groups only swaps the overlay's CSS position-anchor.
 
@@ -192,9 +198,57 @@ const BrowserPaneOverlayLayer = memo(function BrowserPaneOverlayLayer({
           />
         )
       })}
+      {/* Why: last in DOM order so the placeholder paints over whichever guest the group was
+          showing — the group's own active tab is untouched, since a client-hosted row owns no
+          unified tab to become active. */}
+      <ClientHostedBrowserRowOverlaySlot
+        worktreeId={worktreeId}
+        groups={groups}
+        isWorktreeActive={isWorktreeActive}
+      />
     </>
   )
 })
+
+function ClientHostedBrowserRowOverlaySlot({
+  worktreeId,
+  groups,
+  isWorktreeActive
+}: {
+  worktreeId: string
+  groups: readonly TabGroup[]
+  isWorktreeActive: boolean
+}): React.JSX.Element | null {
+  const rows = useClientHostedBrowserRows(worktreeId)
+  const selection = useClientHostedBrowserRowSelection()
+  const selectedRow =
+    selection?.worktreeId === worktreeId && isClientHostedBrowserRowSelectionLive(selection, groups)
+      ? rows.find((row) => row.browserPageId === selection.browserPageId)
+      : undefined
+  const anchorName = selectedRow ? tabGroupBodyAnchorName(selection!.groupId) : undefined
+  const style = useMemo<React.CSSProperties | null>(
+    () =>
+      anchorName
+        ? {
+            position: 'absolute',
+            positionAnchor: anchorName,
+            top: `anchor(${anchorName} top)`,
+            left: `anchor(${anchorName} left)`,
+            width: `anchor-size(${anchorName} width)`,
+            height: `anchor-size(${anchorName} height)`
+          }
+        : null,
+    [anchorName]
+  )
+  if (!selectedRow || !style || !isWorktreeActive) {
+    return null
+  }
+  return (
+    <div style={style} className="flex min-h-0 flex-col">
+      <ClientHostedBrowserHostRowPane row={selectedRow} />
+    </div>
+  )
+}
 
 export const RetainedBrowserPaneOverlayLayer = memo(function RetainedBrowserPaneOverlayLayer({
   worktreeId,

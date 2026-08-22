@@ -45,7 +45,17 @@
         "canceled": "Download canceled.",
         "failed": "Couldn't finish the download."
       },
-      "popupBlocked": "Popup blocked: {{origin}}"
+      "popupBlocked": "Popup blocked: {{origin}}",
+      "hostPaneOfflineTitle": "That device is no longer connected",
+      "hostPaneNamedTitle": "Showing on {{device}}",
+      "hostPaneTitle": "Showing on another device",
+      "hostPaneOfflineDescription": "This page stays listed so you can close it from here. It will come back when the device reconnects.",
+      "hostPaneDescription": "This page renders on the paired desktop that opened it, so there is nothing to display here.",
+      "hostRowClose": "Close hosted page",
+      "hostRowOfflineNamed": "Offline — was hosted on {{device}}",
+      "hostRowOffline": "Offline — the device hosting it quit",
+      "hostRowNamed": "Hosted on {{device}}",
+      "hostRow": "Hosted on another device"
     },
     "navigation": {
       "back": "Back",
