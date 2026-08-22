@@ -34,7 +34,9 @@ export function dispatchBrowserHostLeaseFence(
     dependencies.fenceRoute(route, routeReason)
   )
   // Why: a fenced page never completes retirement through the client, so complete it here or the
-  // placement, its capacity, and its runtime page record stay stranded for the runtime's life.
+  // placement and its capacity stay stranded for the runtime's life. The runtime page record is
+  // deliberately kept — retention is what lets a returning host of the same identity recover the
+  // tab — see retainRuntimeBrowserClientPageRecord for what that costs.
   for (const retirement of fencedPages) {
     try {
       dependencies.releaseFencedPage(retirement)

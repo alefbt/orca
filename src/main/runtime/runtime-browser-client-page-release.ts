@@ -41,8 +41,14 @@ export function releaseRuntimeBrowserClientPageRecord(
  * A quit desktop used to take its pages down with it: the lease fenced and every tab it placed
  * vanished for every client. Terminals outlive a client quit, and browser tabs have to as well.
  * The record keeps its now-dead placement, which is what a returning host of the same identity
- * matches on to recover the page; the placement registry entry is still released, so capacity and
- * command routing are not pinned by a host that may never return.
+ * matches on to recover the page; the placement registry entry is still released, so command
+ * routing and its own capacity are not pinned by a host that may never return.
+ *
+ * What retention does pin is the page registry: a retained record holds one of the runtime's 256
+ * pages (DEFAULT_MAX_RUNTIME_BROWSER_PAGES) for the runtime's life. There is no TTL and no reaper —
+ * only a user close, a worktree removal, or recovery giving up on the page frees it. That is bounded
+ * by tabs the user never closed, because a returning host re-places its pages rather than adding to
+ * them, but it is not bounded by anything the runtime does on its own.
  *
  * Retained tabs stay closeable: `browserTabClose` retires a page whose placement is gone without
  * asking the absent host first.
