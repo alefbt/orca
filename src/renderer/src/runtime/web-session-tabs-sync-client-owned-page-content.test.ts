@@ -379,6 +379,32 @@ describe('browser rows this client hosts own their page content', () => {
     expect(afterSecond.browserPagesByWorkspace[REMOTE_PAGE]?.[0]?.title).toBe(GUEST_TITLE)
   })
 
+  // Why a placement that names nobody has to be handled: session-tab snapshots are not validated
+  // against the placement schema on the way in, so a host on another version can publish one — and
+  // over the wire an absent id arrives as JSON null, which is also what this client reports when it
+  // hosts nothing. Two absent identities are not a match.
+  it.each([
+    ['a null host id', null],
+    ['no host id at all', undefined]
+  ])('takes host content for a client placement carrying %s', (_label, browserHostClientId) => {
+    hostingClient(null)
+    const state = stateWithLocalRow()
+    const patch = applyStaleSnapshot(
+      state,
+      staleHostSnapshot({
+        placement: {
+          kind: 'client',
+          browserHostClientId
+        } as unknown as RuntimeBrowserClientPlacement
+      })
+    )
+
+    expect(syncedPage(patch, state)).toMatchObject({
+      title: HOST_FALLBACK_TITLE,
+      url: HOST_STALE_URL
+    })
+  })
+
   // Why an explicit server placement and not just an absent one: mixed versions really do publish
   // it, and an absence-only test cannot tell a client check apart from a placement check.
   it('takes host content for an explicitly server-placed page with a local row', () => {
