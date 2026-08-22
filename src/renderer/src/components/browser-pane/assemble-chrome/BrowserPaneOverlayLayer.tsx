@@ -221,11 +221,15 @@ function ClientHostedBrowserRowOverlaySlot({
 }): React.JSX.Element | null {
   const rows = useClientHostedBrowserRows(worktreeId)
   const selection = useClientHostedBrowserRowSelection()
-  const selectedRow =
+  const liveSelection =
     selection?.worktreeId === worktreeId && isClientHostedBrowserRowSelectionLive(selection, groups)
-      ? rows.find((row) => row.browserPageId === selection.browserPageId)
-      : undefined
-  const anchorName = selectedRow ? tabGroupBodyAnchorName(selection!.groupId) : undefined
+      ? selection
+      : null
+  const selectedRow = liveSelection
+    ? rows.find((row) => row.browserPageId === liveSelection.browserPageId)
+    : undefined
+  const anchorName =
+    selectedRow && liveSelection ? tabGroupBodyAnchorName(liveSelection.groupId) : undefined
   const style = useMemo<React.CSSProperties | null>(
     () =>
       anchorName
