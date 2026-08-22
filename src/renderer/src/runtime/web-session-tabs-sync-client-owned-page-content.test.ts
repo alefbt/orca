@@ -41,17 +41,15 @@ const CLIENT_PLACEMENT: RuntimeBrowserClientPlacement = {
   pageHostGeneration: 1
 }
 
-/**
- * Stands this client up as the given browser host, or — for null — as one that hosts no guests at
- * all: the web client's api has a browser namespace, it just cannot answer this.
- */
+/** Stands this client up as the given browser host, or — for null — as a renderer main stamped none. */
 function hostingClient(browserHostClientId: string | null): void {
-  vi.stubGlobal(
-    'api',
-    browserHostClientId === null
-      ? { browser: {} }
-      : { browser: { readClientHostId: () => browserHostClientId } }
-  )
+  vi.stubGlobal('api', { browser: { readClientHostId: () => browserHostClientId } })
+  resetBrowserClientHostIdForTests()
+}
+
+/** The web client: an api with a browser namespace that carries no such accessor at all. */
+function hostingNothingOnWeb(): void {
+  vi.stubGlobal('api', { browser: {} })
   resetBrowserClientHostIdForTests()
 }
 
@@ -331,10 +329,11 @@ describe('browser rows this client hosts own their page content', () => {
   // so a predicate that asks only whether a row exists cannot tell a mirror from a host until the
   // second one arrives — and by then the mirror it froze is a permanent one.
   it.each([
-    ['a second desktop client', OTHER_CLIENT],
-    ['a client that hosts no guest at all', null]
-  ])('keeps tracking the host on %s', (_label, browserHostClientId) => {
-    hostingClient(browserHostClientId)
+    ['a second desktop client', () => hostingClient(OTHER_CLIENT)],
+    ['the web client, whose api cannot answer', hostingNothingOnWeb],
+    ['a renderer that was stamped no host id', () => hostingClient(null)]
+  ])('keeps tracking the host on %s', (_label, standUpClient) => {
+    standUpClient()
     const first = makeState()
     const afterFirst = mergePatch(first, applyStaleSnapshot(first))
     const afterSecond = mergePatch(afterFirst, applyStaleSnapshot(afterFirst, movedHostSnapshot()))
