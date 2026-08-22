@@ -274,7 +274,7 @@ describe('createMainWindow', () => {
   // Why the renderer is told this at birth rather than asked for it: it needs to know whether a
   // client-placed page is its own guest before it interprets the first session snapshot, and
   // Electron never answers a sendSync that lands before its listener exists.
-  it('stamps the browser host id into the renderer that owns the guests, and no guest', () => {
+  it('stamps the browser host id into the renderer that owns the guests, and strips it from a guest that carries one', () => {
     const windowHandlers: Record<string, (...args: any[]) => void> = {}
     const webContents = {
       getURL: vi.fn(() => 'file:///opt/orca/renderer/index.html'),
@@ -317,7 +317,9 @@ describe('createMainWindow', () => {
     expect(stamped).toEqual([formatBrowserClientHostIdArgument(getBrowserClientHostId())])
     expect(readBrowserClientHostIdArgument(stamped ?? [])).toBe(getBrowserClientHostId())
 
-    // Guests inherit the embedder's web preferences; the id belongs to the renderer, not the page.
+    // Electron 43 does not hand a guest the embedder's additionalArguments, so this stamp is one
+    // Electron would not have put there: what is pinned is that a guest cannot come out of the
+    // handler holding the id, not that it arrives holding it.
     const guestPreferences = {
       partition: 'persist:orca-browser',
       additionalArguments: [...(stamped ?? [])]

@@ -515,7 +515,9 @@ export function createMainWindow(
     webPreferences.preload = browserWindowClosePreload
     // Why: older Electron builds expose preloadURL alongside preload; delete both so the guest can't inherit the main preload bridge.
     delete (webPreferences as Record<string, unknown>).preloadURL
-    // Why: the embedder's argv carries this app's browser-host id; a guest has no use for it.
+    // Why delete something Electron does not set: 43 does not pass the embedder's
+    // additionalArguments down to a guest, so this clears a key that is absent today. Kept as
+    // insurance — if that ever changes, the guest would read this app's browser-host id.
     delete webPreferences.additionalArguments
     webPreferences.nodeIntegration = false
     webPreferences.nodeIntegrationInSubFrames = false
