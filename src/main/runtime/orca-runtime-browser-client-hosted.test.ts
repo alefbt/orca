@@ -553,7 +553,8 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
             issueClientPageCommand,
             requireClientPage,
             beginPageRetirement,
-            completePageRetirement
+            completePageRetirement,
+            getPlacement: () => registry.getPage('page-client')?.placement
           }) as never,
         resolveBrowserWorkspace: vi.fn(async () => ({ id: 'wt-1' })),
         retireRuntimeOwnedBrowserSessionTab,
@@ -576,6 +577,45 @@ describe('RuntimeBrowserCommands client-hosted routing', () => {
     expect(registry.getPage('page-client')).toBeUndefined()
     expect(retireRuntimeOwnedBrowserSessionTab).toHaveBeenCalledWith('wt-1', 'page-client')
     expect(notifyHeadlessBrowserSessionTabsChanged).not.toHaveBeenCalled()
+  })
+
+  it('closes a retained client page whose host is gone without commanding it', async () => {
+    const { RuntimeBrowserCommands } = await import('./orca-runtime-browser')
+    const registry = new RuntimeBrowserPageRegistry()
+    publishClientPage(registry, { browserPageId: 'page-client' })
+    const issueClientPageCommand = vi.fn()
+    const requireClientPage = vi.fn(() => {
+      throw new Error('browser_host_lease_required')
+    })
+    const retireRuntimeOwnedBrowserSessionTab = vi.fn()
+    const commands = new RuntimeBrowserCommands(
+      createHost({
+        getAgentBrowserBridge: () => null,
+        getRuntimeBrowserPageRegistry: () => registry,
+        getBrowserHostLeaseRegistry: () =>
+          ({
+            authorityRuntimeId: 'runtime-a',
+            authorityEpoch: 'epoch-a',
+            issueClientPageCommand,
+            requireClientPage,
+            beginPageRetirement: vi.fn(),
+            completePageRetirement: vi.fn(() => true),
+            // The fence released the placement while keeping the page listed.
+            getPlacement: () => undefined
+          }) as never,
+        resolveBrowserWorkspace: vi.fn(async () => ({ id: 'wt-1' })),
+        retireRuntimeOwnedBrowserSessionTab,
+        notifyHeadlessBrowserSessionTabsChanged: vi.fn()
+      })
+    )
+
+    await expect(
+      commands.browserTabClose({ worktree: 'id:wt-1', page: 'page-client' })
+    ).resolves.toEqual({ closed: true })
+    expect(issueClientPageCommand).not.toHaveBeenCalled()
+    expect(requireClientPage).not.toHaveBeenCalled()
+    expect(registry.getPage('page-client')).toBeUndefined()
+    expect(retireRuntimeOwnedBrowserSessionTab).toHaveBeenCalledWith('wt-1', 'page-client')
   })
 
   it('does not fall back to a server page after explicit client placement fails', async () => {

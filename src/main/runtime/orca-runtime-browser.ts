@@ -1940,10 +1940,14 @@ export class RuntimeBrowserCommands {
     }
     if (clientPage) {
       const authority = this.host.getBrowserHostLeaseRegistry()
-      await closeRuntimeBrowserClientPage(authority, {
-        browserPageId: clientPage.browserPageId,
-        placement: clientPage.placement
-      })
+      // Why: a retained page whose host quit has no placement left to command, and asking the
+      // absent host first would refuse the close and strand the tab with no way to dismiss it.
+      if (authority.getPlacement(clientPage.browserPageId)) {
+        await closeRuntimeBrowserClientPage(authority, {
+          browserPageId: clientPage.browserPageId,
+          placement: clientPage.placement
+        })
+      }
       if (!pages.retirePage(clientPage.browserPageId, clientPage.placement)) {
         throw new Error('browser_page_placement_stale')
       }
