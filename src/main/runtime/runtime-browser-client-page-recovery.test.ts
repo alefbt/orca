@@ -208,6 +208,33 @@ describe('runtime browser client page recovery', () => {
     })
   })
 
+  it('recovers a page retained from a host generation that quit', async () => {
+    const { authority, commands, notifyWorkspace, pages, placements } = harness({
+      url: 'https://retained.internal/'
+    })
+    // The fence released the placement but kept the record naming the generation that placed it.
+    placements.set('page-a', undefined)
+
+    await recoverUnavailableRuntimeBrowserClientPages({
+      lease: { ...lease([]), browserHostGeneration: 5 },
+      authority,
+      pages,
+      notifyWorkspace
+    })
+
+    // Nothing to close: the desktop that owned the old generation is gone.
+    expect(commands).toEqual([{ browserPageId: 'page-a', type: 'navigate', pageHostGeneration: 8 }])
+    expect(authority.createClientPage).toHaveBeenCalledWith(
+      expect.objectContaining({ browserPageId: 'page-a', browserHostClientId: 'host-a' })
+    )
+    expect(pages.getPage('page-a')).toMatchObject({
+      placement: newPlacement,
+      url: 'https://retained.internal/',
+      loading: false
+    })
+    expect(notifyWorkspace).toHaveBeenCalledOnce()
+  })
+
   it('refuses to adopt a placement another host now owns', async () => {
     const { authority, notifyWorkspace, pages, placements } = harness()
     placements.set('page-a', Object.freeze({ ...newPlacement, browserHostClientId: 'host-b' }))

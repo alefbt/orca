@@ -57,14 +57,14 @@ export async function recoverUnavailableRuntimeBrowserClientPages(options: {
     return
   }
   const inventoryByPageId = new Map(inventory.map((page) => [page.browserPageId, page]))
-  const pages = options.pages
-    .listPages()
-    .filter(
-      (page) =>
-        page.placement.browserHostClientId === options.lease.browserHostClientId &&
-        page.placement.browserHostGeneration === options.lease.browserHostGeneration &&
-        !isActiveExactPage(page, inventoryByPageId.get(page.browserPageId), options.lease)
-    )
+  const pages = options.pages.listPages().filter(
+    (page) =>
+      page.placement.browserHostClientId === options.lease.browserHostClientId &&
+      // Why: a page retained across a host quit still names the generation that placed it, so
+      // recovery has to reach back past this lease's own generation to pick it up again.
+      page.placement.browserHostGeneration <= options.lease.browserHostGeneration &&
+      !isActiveExactPage(page, inventoryByPageId.get(page.browserPageId), options.lease)
+  )
   await mapWithConcurrency(
     pages,
     MAX_RECOVERY_CONCURRENCY,
