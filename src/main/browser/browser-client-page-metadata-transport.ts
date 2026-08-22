@@ -6,7 +6,13 @@ export type BrowserClientPageMetadataSender = {
   sendPageMetadataRequest(params: unknown, timeoutMs: number): Promise<RuntimeRpcResponse<unknown>>
 }
 
-export const BROWSER_CLIENT_PAGE_METADATA_REQUEST_TIMEOUT_MS = 10_000
+/**
+ * Not a latency budget — a liveness one. A request that times out on the lease's subscription tears
+ * the whole subscription down, fencing every page the host is running. Metadata is the most
+ * frequent traffic on that socket and the least important, so it must never be the message that
+ * declares a working lease dead: it waits at least as long as anything else sharing the connection.
+ */
+export const BROWSER_CLIENT_PAGE_METADATA_REQUEST_TIMEOUT_MS = 30_000
 
 /**
  * Carries a page's url/title back to the runtime over the browser-host lease.

@@ -1,4 +1,8 @@
-import type { BrowserClientPageMetadataUnpublished } from './browser-client-page-metadata-publisher'
+import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
+import {
+  createBrowserClientPageMetadataPublisher,
+  type BrowserClientPageMetadataUnpublished
+} from './browser-client-page-metadata-publisher'
 
 /**
  * Why this exists at all: a client-hosted page's URL and title only reach its runtime through a
@@ -26,6 +30,30 @@ export function reportUnpublishedBrowserClientPageMetadata(
   }
   warned.add(key)
   console.warn('[browser-client-page] metadata publish did not land:', { browserPageId, ...detail })
+}
+
+/**
+ * A publisher wired to the one route that reaches the runtime: main, which holds the host lease.
+ * Publishing straight from this renderer is refused as a stale lease and silently never lands.
+ */
+export function startBrowserClientPageMetadataPublisher(options: {
+  browserPageId: string
+  environmentId: string
+  placement: RuntimeBrowserClientPlacement
+  nextRevision: () => number
+}): ReturnType<typeof createBrowserClientPageMetadataPublisher> {
+  return createBrowserClientPageMetadataPublisher({
+    browserPageId: options.browserPageId,
+    placement: options.placement,
+    nextRevision: options.nextRevision,
+    publish: (params) =>
+      window.api.browser.publishClientPageMetadata({
+        environmentId: options.environmentId,
+        params
+      }),
+    onUnpublished: (detail) =>
+      reportUnpublishedBrowserClientPageMetadata(options.browserPageId, detail)
+  })
 }
 
 export function forgetBrowserClientPageMetadataReports(browserPageId: string): void {

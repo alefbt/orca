@@ -115,6 +115,27 @@ describe('browser client page metadata publisher', () => {
       errorCode: 'browser_host_lease_stale'
     })
   })
+
+  // Why a rejection needs its own case: a publish that never reaches the runtime rejects rather
+  // than answering, so the reported-outcome path and the thrown path are different code.
+  it('reports a publish that threw on its way out', async () => {
+    const onUnpublished = vi.fn()
+    let revision = 0
+    const publisher = createBrowserClientPageMetadataPublisher({
+      browserPageId: 'page-a',
+      placement: PLACEMENT,
+      nextRevision: () => ++revision,
+      publish: () => Promise.reject(new Error('remote_runtime_unavailable')),
+      onUnpublished
+    })
+
+    publisher.publish(snapshot('Thrown'))
+    await vi.waitFor(() => expect(onUnpublished).toHaveBeenCalledTimes(1))
+    expect(onUnpublished).toHaveBeenNthCalledWith(1, {
+      reason: 'failed',
+      errorCode: 'remote_runtime_unavailable'
+    })
+  })
 })
 
 function snapshot(title: string) {

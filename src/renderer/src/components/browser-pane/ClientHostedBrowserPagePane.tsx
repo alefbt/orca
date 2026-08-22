@@ -7,13 +7,10 @@ import type {
 } from '../../../../shared/browser-workspace-types'
 import { redactKagiSessionToken, toHttpsRecoveryUrl } from '../../../../shared/browser-url'
 import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
-import {
-  createBrowserClientPageMetadataPublisher,
-  type BrowserClientPageMetadataSnapshot
-} from './browser-client-page-metadata-publisher'
+import type { BrowserClientPageMetadataSnapshot } from './browser-client-page-metadata-publisher'
 import {
   forgetBrowserClientPageMetadataReports,
-  reportUnpublishedBrowserClientPageMetadata
+  startBrowserClientPageMetadataPublisher
 } from './browser-client-page-metadata-reporting'
 import { attachBrowserClientPageToViewport } from './browser-client-page-renderer-installation'
 import { useBrowserClientHostedDownloadNotices } from './browser-client-hosted-download-notices'
@@ -219,21 +216,16 @@ export function ClientHostedBrowserPagePane({
       return
     }
     const webview = attachment.webview
-    const publisher = createBrowserClientPageMetadataPublisher({
+    const publisher = startBrowserClientPageMetadataPublisher({
       browserPageId: browserTab.id,
+      environmentId: runtimeEnvironmentId,
       placement: {
         kind: 'client',
         browserHostClientId,
         browserHostGeneration,
         pageHostGeneration
       },
-      nextRevision: attachment.nextMetadataRevision,
-      publish: (params) =>
-        window.api.browser.publishClientPageMetadata({
-          environmentId: runtimeEnvironmentId,
-          params
-        }),
-      onUnpublished: (detail) => reportUnpublishedBrowserClientPageMetadata(browserTab.id, detail)
+      nextRevision: attachment.nextMetadataRevision
     })
     webviewRef.current = webview
     setAttachmentError(null)

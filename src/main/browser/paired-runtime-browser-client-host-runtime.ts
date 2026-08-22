@@ -17,13 +17,9 @@ import {
 import { getBrowserClientHostId } from './browser-client-host-id'
 import { deriveBrowserRoutePartitionStorageScope } from './browser-route-identity'
 import { BrowserClientDownloadRelay } from './browser-client-download-relay'
-import { registerBrowserClientDownloadRouter } from './browser-client-download-routing'
 import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
+import { registerBrowserClientHostEnvironmentRoutes } from './browser-client-host-environment-routes'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
-import {
-  BrowserClientPageMetadataTransport,
-  registerBrowserClientPageMetadataTransport
-} from './browser-client-page-metadata-transport'
 import { createBrowserClientPageGuestBinding } from './browser-client-page-guest-binding'
 import { browserManager } from './browser-manager'
 import { BrowserClientUploadStaging } from './browser-client-upload-staging'
@@ -82,22 +78,9 @@ const browserClientHosts =
         transport: fileChannel,
         resolvePage: (webContentsId) => executor?.findPageByWebContentsId(webContentsId)
       })
-      // Keyed by environment so a download resolves the composition that owns its page, never
-      // whichever one composed last.
-      const releaseDownloadRouting = registerBrowserClientDownloadRouter(
-        input.environmentId,
-        downloadRelay
-      )
-      const pageMetadata = new BrowserClientPageMetadataTransport()
-      const releaseMetadataRouting = registerBrowserClientPageMetadataTransport(
-        input.environmentId,
-        pageMetadata
-      )
+      const routes = registerBrowserClientHostEnvironmentRoutes(input.environmentId, downloadRelay)
       return new PairedRuntimeBrowserClientHostComposition({
-        onClosing: () => {
-          releaseDownloadRouting()
-          releaseMetadataRouting()
-        },
+        onClosing: routes.release,
         initialInput: input,
         createRoutes: (next, authority) =>
           createNetworkRoutes(next.pairing, authority, next.storageScope, input.environmentId),
@@ -143,7 +126,7 @@ const browserClientHosts =
             onError
           })
           fileChannel.bind(host)
-          pageMetadata.bind(host)
+          routes.pageMetadata.bind(host)
           return host
         },
         onError: (error) => retireFailedEnvironmentHost(input.environmentId, error)

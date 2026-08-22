@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
+import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
+import { BROWSER_CLIENT_FILE_CHANNEL_REQUEST_TIMEOUT_MS } from './browser-client-file-channel-transport'
 import {
+  BROWSER_CLIENT_PAGE_METADATA_REQUEST_TIMEOUT_MS,
   BrowserClientPageMetadataTransport,
   publishBrowserClientPageMetadata,
   registerBrowserClientPageMetadataTransport,
@@ -20,15 +23,32 @@ const PARAMS = {
   canGoForward: false
 }
 
+function answered(result: unknown): RuntimeRpcResponse<unknown> {
+  return { id: 'page-metadata-a', ok: true, result, _meta: { runtimeId: 'runtime-a' } }
+}
+
+function refused(code: string, message: string): RuntimeRpcResponse<unknown> {
+  return { id: 'page-metadata-a', ok: false, error: { code, message } }
+}
+
 afterEach(() => {
   resetBrowserClientPageMetadataTransports()
 })
 
 describe('browser client page metadata transport', () => {
+  // Why the timeout is asserted at all, and asserted relatively: a request that times out on the
+  // lease's subscription fails the whole subscription, fencing every page the host runs. Metadata
+  // is the most frequent and least important traffic on that socket, so a tighter deadline here
+  // would make it the message that kills a lease the file channel would still be waiting on.
+  it('waits at least as long as anything else sharing the lease connection', () => {
+    expect(BROWSER_CLIENT_PAGE_METADATA_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(
+      BROWSER_CLIENT_FILE_CHANNEL_REQUEST_TIMEOUT_MS
+    )
+    expect(BROWSER_CLIENT_PAGE_METADATA_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000)
+  })
+
   it('sends the publish over the bound lease and reports the acknowledgement', async () => {
-    const sendPageMetadataRequest = vi
-      .fn()
-      .mockResolvedValue({ ok: true, result: { accepted: true }, _meta: { runtimeId: 'a' } })
+    const sendPageMetadataRequest = vi.fn().mockResolvedValue(answered({ accepted: true }))
     const transport = new BrowserClientPageMetadataTransport()
     transport.bind({ sendPageMetadataRequest })
 
@@ -41,12 +61,7 @@ describe('browser client page metadata transport', () => {
   it('carries an un-accepted acknowledgement back to the caller', async () => {
     const transport = new BrowserClientPageMetadataTransport()
     transport.bind({
-      sendPageMetadataRequest: () =>
-        Promise.resolve({
-          ok: true as const,
-          result: { accepted: false },
-          _meta: { runtimeId: 'a' }
-        })
+      sendPageMetadataRequest: () => Promise.resolve(answered({ accepted: false }))
     })
 
     await expect(transport.publish(PARAMS)).resolves.toEqual({ accepted: false })
@@ -55,23 +70,13 @@ describe('browser client page metadata transport', () => {
   it('rejects a runtime error and an unreadable acknowledgement', async () => {
     const failing = new BrowserClientPageMetadataTransport()
     failing.bind({
-      sendPageMetadataRequest: () =>
-        Promise.resolve({
-          ok: false as const,
-          error: { code: 'browser_host_lease_stale', message: 'stale' },
-          _meta: { runtimeId: 'a' }
-        })
+      sendPageMetadataRequest: () => Promise.resolve(refused('browser_host_lease_stale', 'stale'))
     })
     await expect(failing.publish(PARAMS)).rejects.toThrow('stale')
 
     const garbled = new BrowserClientPageMetadataTransport()
     garbled.bind({
-      sendPageMetadataRequest: () =>
-        Promise.resolve({
-          ok: true as const,
-          result: { accepted: 'yes' },
-          _meta: { runtimeId: 'a' }
-        })
+      sendPageMetadataRequest: () => Promise.resolve(answered({ accepted: 'yes' }))
     })
     await expect(garbled.publish(PARAMS)).rejects.toThrow(
       'browser_client_page_metadata_ack_invalid'
@@ -94,9 +99,7 @@ describe('browser client page metadata transport', () => {
     const transport = new BrowserClientPageMetadataTransport()
     const outgoing = { sendPageMetadataRequest: vi.fn() }
     const replacement = {
-      sendPageMetadataRequest: vi
-        .fn()
-        .mockResolvedValue({ ok: true, result: { accepted: true }, _meta: { runtimeId: 'a' } })
+      sendPageMetadataRequest: vi.fn().mockResolvedValue(answered({ accepted: true }))
     }
     transport.bind(outgoing)
     transport.bind(replacement)
@@ -111,9 +114,7 @@ describe('browser client page metadata routing', () => {
   it('publishes through the transport of the environment that owns the page', async () => {
     const owning = new BrowserClientPageMetadataTransport()
     const other = new BrowserClientPageMetadataTransport()
-    const owningSend = vi
-      .fn()
-      .mockResolvedValue({ ok: true, result: { accepted: true }, _meta: { runtimeId: 'a' } })
+    const owningSend = vi.fn().mockResolvedValue(answered({ accepted: true }))
     const otherSend = vi.fn()
     owning.bind({ sendPageMetadataRequest: owningSend })
     other.bind({ sendPageMetadataRequest: otherSend })
@@ -126,10 +127,19 @@ describe('browser client page metadata routing', () => {
     expect(otherSend).not.toHaveBeenCalled()
   })
 
-  it('fails a publish for an environment that hosts nothing', async () => {
+  // Why another environment is registered here: with the map empty, "no transport for this
+  // environment" and "no transport at all" are the same state, and a lookup that fell back to
+  // whichever transport happened to be registered would fail this test by accident.
+  it('fails a publish for an environment that hosts nothing while another one does', async () => {
+    const elsewhere = new BrowserClientPageMetadataTransport()
+    const elsewhereSend = vi.fn()
+    elsewhere.bind({ sendPageMetadataRequest: elsewhereSend })
+    registerBrowserClientPageMetadataTransport('environment-b', elsewhere)
+
     await expect(publishBrowserClientPageMetadata('environment-a', PARAMS)).rejects.toBeInstanceOf(
       RemoteRuntimeClientError
     )
+    expect(elsewhereSend).not.toHaveBeenCalled()
   })
 
   it('stops routing to a released transport without disturbing a re-registered one', async () => {
@@ -137,12 +147,7 @@ describe('browser client page metadata routing', () => {
     const release = registerBrowserClientPageMetadataTransport('environment-a', first)
     const second = new BrowserClientPageMetadataTransport()
     second.bind({
-      sendPageMetadataRequest: () =>
-        Promise.resolve({
-          ok: true as const,
-          result: { accepted: true },
-          _meta: { runtimeId: 'a' }
-        })
+      sendPageMetadataRequest: () => Promise.resolve(answered({ accepted: true }))
     })
     registerBrowserClientPageMetadataTransport('environment-a', second)
 
