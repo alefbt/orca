@@ -508,7 +508,9 @@ describe('hydrateBrowserSession remote page handle seeding', () => {
       environmentId: 'env-1',
       remotePageId: 'remote-page-1'
     })
-    const callRpc = vi.fn(async () => ({ tab: { url: 'https://example.com/', title: 'Example' } }))
+    const callRpc = vi.fn(async (_target: unknown, _method: string) => ({
+      tab: { url: 'https://example.com/', title: 'Example' }
+    }))
     const session = createStreamedSession(store, {
       callRpc: callRpc as never,
       currentUrl: 'https://example.com/'
@@ -534,7 +536,7 @@ describe('hydrateBrowserSession remote page handle seeding', () => {
       remoteBrowserPageId: 'remote-page-1',
       url: 'https://example.com/saved'
     })
-    const callRpc = vi.fn(async (_target: unknown, method: string) => {
+    const callRpc = vi.fn(async (_target: unknown, method: string, _params?: unknown) => {
       if (method === 'browser.tabShow') {
         throw new RuntimeRpcCallError({
           ok: false,

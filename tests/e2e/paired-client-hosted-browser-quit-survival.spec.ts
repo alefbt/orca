@@ -192,6 +192,25 @@ async function readClientBrowserRows(
   }, worktreeId)
 }
 
+/**
+ * What the client-hosted pane has settled on: its guest, the unavailable notice, or still waiting.
+ * Read off the rendered pane rather than the store, because "the spinner never stops" is a
+ * rendering fact and the store field behind it looks the same either way.
+ */
+async function readClientHostedPaneResolution(
+  page: Page
+): Promise<'guest' | 'unavailable' | 'waiting'> {
+  return page.evaluate(() => {
+    if (document.querySelector('webview')) {
+      return 'guest'
+    }
+    const heading = [...document.querySelectorAll('div')].some(
+      (node) => node.textContent === 'Client-hosted browser unavailable'
+    )
+    return heading ? 'unavailable' : 'waiting'
+  })
+}
+
 async function createProductBrowserPage(page: Page, url: string): Promise<void> {
   await page.evaluate(async (url) => {
     const state = window.__store?.getState()
@@ -442,6 +461,57 @@ test('closes a retained client-hosted tab while its host is gone', async ({
       await readHostBrowserPageIds(host.client, testRepoPath),
       'the closed tab must leave the runtime for good'
     ).not.toContain(opened.remotePageId)
+
+    // The other half of "closeable while absent" is what the desktop does when it comes back to a
+    // page nobody has any more. Its own session still lists the row and nothing will ever publish
+    // it, so the row has to resolve on its own and then go when the user says so.
+    client = await launchPairedElectronClient(host.offer, testInfo, CLIENT_NAME, {
+      reuseUserDataDir: profileDir
+    })
+    abandonedProfile = null
+    const relaunchedWorktreeId = await waitForPairedWorktreeId(client.page, testRepoPath)
+    await selectPairedWorktreeGroup(client.page, client.environmentId, relaunchedWorktreeId)
+
+    // Presence before absence: without this, every check below passes on a row that never restored.
+    await expect
+      .poll(() => findMirroredBrowserPage(client!.page, relaunchedWorktreeId, fixture.markerUrl), {
+        timeout: 120_000,
+        message: 'the relaunched client never restored the row its own session persisted'
+      })
+      .not.toBeNull()
+    const orphaned = await findMirroredBrowserPage(
+      client.page,
+      relaunchedWorktreeId,
+      fixture.markerUrl
+    )
+    await client.page.evaluate(
+      ({ browserPageId, worktreeId }) => {
+        window.__store?.getState().focusBrowserTabInWorktree(worktreeId, browserPageId, {
+          surfacePane: true
+        })
+      },
+      { browserPageId: orphaned!.localPageId, worktreeId: relaunchedWorktreeId }
+    )
+
+    await expect
+      .poll(() => readClientHostedPaneResolution(client!.page), {
+        timeout: 180_000,
+        message: 'the restored row never stopped waiting for a host that cannot answer'
+      })
+      .toBe('unavailable')
+
+    await client.page.evaluate((browserPageId) => {
+      window.__store?.getState().closeBrowserPage(browserPageId)
+    }, orphaned!.localPageId)
+    await expect
+      .poll(
+        async () =>
+          (await readClientBrowserRows(client!.page, relaunchedWorktreeId)).filter((row) =>
+            row.url.startsWith(fixture.origin)
+          ).length,
+        { timeout: 60_000, message: 'the orphaned row never left the client tab strip' }
+      )
+      .toBe(0)
   } finally {
     await client?.dispose()
     if (abandonedProfile) {
