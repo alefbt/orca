@@ -554,6 +554,7 @@ import {
   recognizeAgentProcess
 } from '../../shared/agent-process-recognition'
 import {
+  filterEnabledTuiAgents,
   haveSameDisabledTuiAgents,
   isTuiAgentEnabled,
   pickTuiAgent
@@ -18327,6 +18328,14 @@ export class OrcaRuntimeService {
         `Agent launcher ${agent} is disabled or unavailable.`
       )
     }
+  }
+
+  /** Why: the host that owns the terminal owns its roster, so agent-facing messages resolve it here, not client-side. */
+  listEnabledAgentProcessNames(): string[] {
+    const disabled = this.store?.getSettings()?.disabledTuiAgents
+    return filterEnabledTuiAgents(Object.keys(TUI_AGENT_CONFIG) as TuiAgent[], disabled).map(
+      (agent) => TUI_AGENT_CONFIG[agent].expectedProcess
+    )
   }
 
   resolveTerminalPane(paneKey: string, expectedWorktreeId?: string): RuntimeTerminalResolvePane {

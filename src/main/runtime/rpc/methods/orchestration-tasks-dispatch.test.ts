@@ -194,6 +194,13 @@ describe('orchestration RPC methods', () => {
   })
 
   describe('orchestration.dispatch', () => {
+    async function rejectionMessage(taskId: string): Promise<string> {
+      return call('orchestration.dispatch', { task: taskId, to: 'term_a', inject: true }).then(
+        () => '',
+        (error: unknown) => (error as Error).message
+      )
+    }
+
     function provideInjectIdentity(handle = 'term_a'): void {
       vi.mocked(runtime.getTerminalPaneKey).mockImplementation((candidate) =>
         candidate === handle ? `tab_worker:${handle}` : coordinatorPaneKey
@@ -390,6 +397,31 @@ describe('orchestration RPC methods', () => {
           inject: true
         })
       ).rejects.toThrow('no recognized agent detected')
+    })
+
+    it('names enabled agents from the canonical roster in the inject rejection', async () => {
+      setup()
+      const task = db.createTask({ spec: 'work' })
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(false)
+
+      const message = await rejectionMessage(task.id)
+
+      expect(message).toMatch(/\bagy\b/)
+      expect(message).toMatch(/\bclaude\b/)
+    })
+
+    it('omits disabled agents from the inject rejection', async () => {
+      setup()
+      const task = db.createTask({ spec: 'work' })
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(false)
+      // Why: pins the message to the runtime roster; a reintroduced literal list fails this.
+      vi.spyOn(runtime, 'listEnabledAgentProcessNames').mockReturnValue(['claude', 'codex'])
+
+      const message = await rejectionMessage(task.id)
+
+      expect(message).toContain('no recognized agent detected')
+      expect(message).toContain('(claude, codex)')
+      expect(message).not.toMatch(/\bagy\b/)
     })
 
     it('rejects dispatch to occupied terminal', async () => {

@@ -360,10 +360,7 @@ describe('agent process recognition', () => {
     expect(isAgentForegroundWrapperProcess('vim.exe')).toBe(false)
   })
 
-  it('recognizes the Antigravity CLI from its native `agy` install layouts', () => {
-    // Why: the installer ships a flat native build named `agy` (~/.local/bin/agy on
-    // Unix, %LOCALAPPDATA%\agy\bin\agy.exe on Windows) — there is no npm package,
-    // so `node_modules/antigravity/` is somebody else's placeholder, not this agent.
+  it('recognizes agy from TUI_AGENT_CONFIG, not from a node_modules antigravity entrypoint', () => {
     const agy = { agent: 'antigravity', processName: 'agy' }
 
     expect(recognizeAgentProcess('agy')).toEqual(agy)
@@ -377,6 +374,7 @@ describe('agent process recognition', () => {
       )
     ).toEqual(agy)
     expect(recognizeAgentProcessFromCommandLine('agy --dangerously-skip-permissions')).toEqual(agy)
+    // Why: agy ships as a native binary, so a node-hosted `antigravity` script is somebody else's package.
     expect(
       recognizeAgentProcessFromCommandLine(
         'node /usr/local/lib/node_modules/antigravity/bin/antigravity.js'

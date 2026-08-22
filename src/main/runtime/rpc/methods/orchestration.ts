@@ -27,6 +27,7 @@ import {
   resolveBareOrchestrationRecipient,
   type SendRecipientWarning
 } from './orchestration-recipient-routing'
+import { buildInjectAgentGuidance } from './orchestration-inject-agent-guidance'
 import { resolveRunScope } from './orchestration-run-scope'
 import { ORCHESTRATION_RUN_METHODS } from './orchestration-runs'
 import { ORCHESTRATION_WORKER_METHODS } from './orchestration-worker-methods'
@@ -1643,12 +1644,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       if (params.inject) {
         const hasAgent = await runtime.isTerminalRunningAgent(to)
         if (!hasAgent) {
-          throw new Error(
-            `Cannot dispatch --inject to terminal ${to}: no recognized agent detected. ` +
-              'Inject accepts any agent CLI Orca supports (for example claude, codex, or agy) — ' +
-              'this list is not an allowlist. Start one in the terminal first, ' +
-              'or dispatch without --inject and send the prompt manually.'
-          )
+          throw new Error(buildInjectAgentGuidance(to, runtime.listEnabledAgentProcessNames()))
         }
       }
 
