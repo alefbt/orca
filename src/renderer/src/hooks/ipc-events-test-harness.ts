@@ -66,6 +66,8 @@ export type IpcEventsHarnessOptions = {
   visibleWorktreeTargets?: { id: string; executionHostId?: 'local' | `ssh:${string}` }[]
   /** Snapshot the client-hosted row hydration round trip resolves with. */
   clientHostedBrowserRowsSnapshot?: ClientHostedBrowserRowsEvent[]
+  /** Rejects the hydration round trip instead of resolving it. */
+  clientHostedBrowserRowsSnapshotError?: Error
 }
 
 /**
@@ -181,6 +183,9 @@ export async function loadIpcEventsHarness(
           },
           getClientHostedBrowserRows: async () => {
             await clientHostedBrowserRowsSnapshotGate
+            if (options.clientHostedBrowserRowsSnapshotError) {
+              throw options.clientHostedBrowserRowsSnapshotError
+            }
             return options.clientHostedBrowserRowsSnapshot ?? []
           }
         },

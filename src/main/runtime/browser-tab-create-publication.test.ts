@@ -129,6 +129,11 @@ describe('publishCreatedBrowserSessionTab', () => {
   // `notifiesSessionTabsChanged` gates, so silencing that flag would delete the row with no other
   // test noticing. Pin the coupling, not just the two values.
   it('gives every session-notify placement the announcement its host row rides on', () => {
+    // Presence precondition: the loop below only asserts anything about placements that declare
+    // `session-notify`, so flipping the one that does to `none` in the same edit that silences its
+    // announcement would satisfy the coupling by emptying it. Name the placement that must declare
+    // it — a client-placed page reaches the host renderer through no other route.
+    expect(BROWSER_TAB_CREATE_PUBLICATION_RULES.client.hostRowSource).toBe('session-notify')
     for (const placementKind of BROWSER_TAB_CREATE_PLACEMENT_KINDS) {
       const rules = BROWSER_TAB_CREATE_PUBLICATION_RULES[placementKind]
       if (rules.hostRowSource === 'session-notify') {

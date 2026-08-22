@@ -96,6 +96,24 @@ describe('useIpcEvents client-hosted browser rows', () => {
     expect(readRows(WT)).toEqual([])
   })
 
+  // Why the failed round trip still has to settle: until it does, every push is buffered instead
+  // of applied. A hydration that rejects and never settles means the host strip stays empty for
+  // the window's whole life, and nothing on screen says why.
+  it('applies pushes after the hydration round trip fails', async () => {
+    const { harness, readRows } = await mountHook({
+      clientHostedBrowserRowsSnapshotError: new Error('runtime unreachable')
+    })
+
+    harness.clientHostedBrowserRowsChanged(pushEvent())
+    // Presence precondition: buffered, not applied, while hydration is still outstanding.
+    expect(readRows(WT)).toEqual([])
+    await harness.settleClientHostedBrowserRowsSnapshot()
+
+    expect(readRows(WT).map((row) => row.browserPageId)).toEqual(['page-a'])
+    harness.clientHostedBrowserRowsChanged({ worktreeId: WT, rows: [] })
+    expect(readRows(WT)).toEqual([])
+  })
+
   it('leaves other worktrees alone when one is pushed', async () => {
     const { harness, readRows } = await mountHook()
     await harness.settleClientHostedBrowserRowsSnapshot()
