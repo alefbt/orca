@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_CLIENT_PAGE_CREATION_TIMEOUT_MS } from '../../../../shared/browser-client-page-creation-timeouts'
 import type { BrowserPage } from '../../../../shared/browser-workspace-types'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
 
@@ -41,7 +42,28 @@ function page(): BrowserPage {
   }
 }
 
-function seedStore(options: { restored: boolean; reachable: boolean }): void {
+// 'absent' is the cold-relaunch shape: the pane mounts before any status has been recorded for the
+// environment, so the entry does not exist yet rather than existing with a null status.
+type EnvironmentReachability = 'reachable' | 'unreachable' | 'absent'
+
+function runtimeStatusMap(
+  reachability: EnvironmentReachability
+): Map<string, { status: RuntimeStatus | null; checkedAt: number }> {
+  if (reachability === 'absent') {
+    return new Map()
+  }
+  return new Map([
+    [
+      ENVIRONMENT_ID,
+      {
+        status: reachability === 'reachable' ? ({ runtimeId: 'runtime-a' } as RuntimeStatus) : null,
+        checkedAt: 1
+      }
+    ]
+  ])
+}
+
+function seedStore(options: { restored: boolean; environment: EnvironmentReachability }): void {
   useAppStore.setState({
     remoteBrowserPageHandlesByPageId: options.restored
       ? {
@@ -60,11 +82,7 @@ function seedStore(options: { restored: boolean; reachable: boolean }): void {
             stagedClientHosted: true
           }
         },
-    runtimeStatusByEnvironmentId: new Map(
-      options.reachable
-        ? [[ENVIRONMENT_ID, { status: { runtimeId: 'runtime-a' } as RuntimeStatus, checkedAt: 1 }]]
-        : [[ENVIRONMENT_ID, { status: null, checkedAt: 1 }]]
-    )
+    runtimeStatusByEnvironmentId: runtimeStatusMap(options.environment)
   })
 }
 
@@ -120,7 +138,7 @@ describe('restored client-hosted recovery window', () => {
   })
 
   it('keeps waiting while the window is still open', () => {
-    seedStore({ restored: true, reachable: true })
+    seedStore({ restored: true, environment: 'reachable' })
     renderPane()
 
     act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS - 1))
@@ -130,7 +148,7 @@ describe('restored client-hosted recovery window', () => {
   })
 
   it('stops waiting and offers the reopen escape once the window elapses', () => {
-    seedStore({ restored: true, reachable: true })
+    seedStore({ restored: true, environment: 'reachable' })
     renderPane()
 
     act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS))
@@ -142,7 +160,7 @@ describe('restored client-hosted recovery window', () => {
 
   // Why the row itself is checked: deleting it is the failure mode this replaced. The user decides.
   it('leaves the page row in place when it gives up', () => {
-    seedStore({ restored: true, reachable: true })
+    seedStore({ restored: true, environment: 'reachable' })
     renderPane()
 
     act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS))
@@ -152,7 +170,7 @@ describe('restored client-hosted recovery window', () => {
 
   // Why: nobody has asked the host yet, and the environment's own disconnected state says so.
   it('keeps waiting indefinitely while the environment is unreachable', () => {
-    seedStore({ restored: true, reachable: false })
+    seedStore({ restored: true, environment: 'unreachable' })
     renderPane()
 
     act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS * 10))
@@ -161,10 +179,31 @@ describe('restored client-hosted recovery window', () => {
     expect(noticeShown()).toBe(false)
   })
 
+  // Why the environment starts with no entry at all rather than an unreachable one: this is the
+  // ordering production always takes. A cold relaunch mounts the pane from the persisted row before
+  // any runtime status has been recorded, so the effect's re-run on the flip is the only thing that
+  // ever arms the clock — every other case here seeds the status first and never takes that path.
+  it('arms the window when the environment first becomes reachable', () => {
+    seedStore({ restored: true, environment: 'absent' })
+    renderPane()
+
+    act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS * 2))
+    expect(noticeShown()).toBe(false)
+
+    act(() => {
+      useAppStore.setState({ runtimeStatusByEnvironmentId: runtimeStatusMap('reachable') })
+    })
+
+    act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS - 1))
+    expect(noticeShown()).toBe(false)
+    act(() => vi.advanceTimersByTime(1))
+    expect(noticeShown()).toBe(true)
+  })
+
   // Why the staged case is pinned separately: it also mounts with a null placement, but its host is
   // mid-create rather than absent, and the create path has its own bound.
   it('leaves a staged page that is not restored alone', () => {
-    seedStore({ restored: false, reachable: true })
+    seedStore({ restored: false, environment: 'reachable' })
     renderPane()
 
     act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS * 10))
@@ -176,7 +215,7 @@ describe('restored client-hosted recovery window', () => {
   // Why revocable: the window is a bound on waiting, not a verdict on the page. A slow recovery
   // that lands after it must put the user back on their page rather than on a dead notice.
   it('takes the notice back when the placement finally arrives', () => {
-    seedStore({ restored: true, reachable: true })
+    seedStore({ restored: true, environment: 'reachable' })
     renderPane()
     act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS))
     expect(noticeShown()).toBe(true)
@@ -195,7 +234,7 @@ describe('restored client-hosted recovery window', () => {
   // Why re-entry gets its own case: a host fence clears the placement and re-runs recovery, so the
   // pane returns to waiting. A window that stayed spent would answer the second wait instantly.
   it('waits again when a recovered page loses its placement', () => {
-    seedStore({ restored: true, reachable: true })
+    seedStore({ restored: true, environment: 'reachable' })
     const view = renderPane()
     act(() => vi.advanceTimersByTime(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS))
     act(() => {
@@ -232,11 +271,11 @@ describe('restored client-hosted recovery window', () => {
   // the window shrinks to a millisecond, and a window shorter than one recovery attempt would call
   // healthy pages dead.
   it('waits longer than the runtime spends creating one client page', () => {
-    const RUNTIME_CLIENT_PAGE_CREATION_CEILING_MS = 30_000
-
     expect(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS).toBe(45_000)
+    // Imported, not copied: a locally re-declared ceiling makes raising the runtime's own timeout
+    // invisible here, which is the one change that could turn this window into a false verdict.
     expect(RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS).toBeGreaterThan(
-      RUNTIME_CLIENT_PAGE_CREATION_CEILING_MS
+      DEFAULT_CLIENT_PAGE_CREATION_TIMEOUT_MS
     )
   })
 })

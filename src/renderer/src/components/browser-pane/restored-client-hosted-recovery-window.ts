@@ -10,8 +10,9 @@ import { useAppStore } from '@/store'
  * appears in a snapshot, and the restored marker exempts the row from the absent-from-snapshot cull,
  * so nothing else ever resolves it. This window is the only bound.
  *
- * Longer than the runtime's own 30s per-page creation ceiling so a recovery still in flight is not
- * called dead. Being early is cheap: a placement that lands later clears the notice on its own.
+ * Longer than the runtime's own per-page creation ceiling (DEFAULT_CLIENT_PAGE_CREATION_TIMEOUT_MS)
+ * so a recovery still in flight is not called dead. Being early is cheap: a placement that lands
+ * later clears the notice on its own.
  */
 export const RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS = 45_000
 
