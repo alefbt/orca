@@ -231,6 +231,32 @@ describe('ClientHostedBrowserRowPublisher', () => {
     expect(events).toEqual([{ worktreeId: 'wt-1', rows: [] }])
   })
 
+  // Why this repeats the case above against a non-empty snapshot: with nothing left to hydrate,
+  // replacing the set and merely emptying it are the same operation, so the empty case alone
+  // cannot tell an assignment from a union. Here the two disagree in both directions at once.
+  it('tracks exactly the workspaces a non-empty hydration snapshot carries', () => {
+    const { publisher, registry, events, livePlacements, attach, detach } = createPublisher()
+    publishPage(registry, 'page-1', 'wt-1')
+    livePlacements.add('page-1')
+    publisher.publish('wt-1')
+
+    detach()
+    registry.retirePage('page-1', registry.getPage('page-1')!.placement)
+    publishPage(registry, 'page-2', 'wt-2')
+    livePlacements.add('page-2')
+    attach()
+    expect(publisher.deliverHydrationSnapshot().map((event) => event.worktreeId)).toEqual(['wt-2'])
+    events.length = 0
+
+    // wt-1 left the snapshot, so the renderer no longer holds it and must not be spoken to.
+    publisher.publish('wt-1')
+    // wt-2 arrived through the snapshot, so it is retractable exactly like a published one.
+    registry.retirePage('page-2', registry.getPage('page-2')!.placement)
+    publisher.publish('wt-2')
+
+    expect(events).toEqual([{ worktreeId: 'wt-2', rows: [] }])
+  })
+
   // Why the snapshot replaces rather than adds to the delivered set: the renderer clears before
   // applying it, so a workspace absent from the snapshot is one the renderer no longer holds.
   it('stops tracking a workspace the hydration snapshot no longer carries', () => {
