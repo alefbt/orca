@@ -10,9 +10,12 @@ import { useAppStore } from '@/store'
  * appears in a snapshot, and the restored marker exempts the row from the absent-from-snapshot cull,
  * so nothing else ever resolves it. This window is the only bound.
  *
- * Longer than the runtime's own per-page creation ceiling (DEFAULT_CLIENT_PAGE_CREATION_TIMEOUT_MS)
- * so a recovery still in flight is not called dead. Being early is cheap: a placement that lands
- * later clears the notice on its own.
+ * Longer than the runtime's own per-page creation ceiling (DEFAULT_CLIENT_PAGE_CREATION_TIMEOUT_MS),
+ * which bounds the FIRST BATCH of recoveries and nothing beyond it: recovery runs four pages at a
+ * time and each awaits a create and then a navigate, so the Nth restored page is not owed an answer
+ * until roughly ceil(N/4) x (create + navigate). Past the first batch this notice can appear on a
+ * page that is still recovering normally. That is knowingly early rather than wrong — the window is
+ * revocable, and a placement that lands later clears the notice on its own.
  */
 export const RESTORED_CLIENT_HOSTED_RECOVERY_WINDOW_MS = 45_000
 
