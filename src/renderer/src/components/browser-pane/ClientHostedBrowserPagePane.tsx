@@ -18,6 +18,7 @@ import { useBrowserClientHostedPopupNotices } from './browser-client-hosted-popu
 import { useBrowserClientHostedPermissionNotices } from './browser-client-hosted-permission-notices'
 import { useClientHostedBrowserIntroTour } from './use-client-hosted-browser-intro-tour'
 import { ClientHostedBrowserUnavailableNotice } from './client-hosted-browser-unavailable-notice'
+import { useRestoredClientHostedRecoveryWindow } from './restored-client-hosted-recovery-window'
 import BrowserFind from './assemble-chrome/BrowserFind'
 import { BrowserNavigationControlRow } from './assemble-chrome/browser-navigation-control-row'
 import { BrowserPageContextMenu } from './assemble-chrome/browser-page-context-menu'
@@ -93,6 +94,11 @@ export function ClientHostedBrowserPagePane({
   const browserHostClientId = placement?.browserHostClientId ?? null
   const browserHostGeneration = placement?.browserHostGeneration ?? null
   const pageHostGeneration = placement?.pageHostGeneration ?? null
+  const restoredPageUnrecovered = useRestoredClientHostedRecoveryWindow({
+    browserPageId: browserTab.id,
+    environmentId: runtimeEnvironmentId,
+    placementPending: placement === null
+  })
   // Why: a client-hosted guest is created by main's host runtime, so there is no local guest to
   // recreate — a lost one is page unavailability, whose panel offers the reopen-on-server escape.
   const retryGuestRecoveryRef = useRef<() => void>(() => {})
@@ -357,7 +363,9 @@ export function ClientHostedBrowserPagePane({
           controls={{
             canGoBack: browserTab.canGoBack,
             canGoForward: browserTab.canGoForward,
-            loading: placement === null || browserTab.loading,
+            // Why the unrecovered case reads not-loading: nothing is coming, and a spinner nobody
+            // will ever stop is the one state this pane must not sit in.
+            loading: !restoredPageUnrecovered && (placement === null || browserTab.loading),
             goBack: () => webviewRef.current?.goBack(),
             goForward: () => webviewRef.current?.goForward(),
             reload: () => reload.runReloadTrigger('button'),
@@ -417,7 +425,7 @@ export function ClientHostedBrowserPagePane({
             }
           />
         ) : null}
-        {attachmentError ? (
+        {attachmentError || restoredPageUnrecovered ? (
           <ClientHostedBrowserUnavailableNotice
             runtimeEnvironmentId={runtimeEnvironmentId}
             worktreeId={worktreeId}
