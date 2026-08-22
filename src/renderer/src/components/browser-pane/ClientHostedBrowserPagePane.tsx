@@ -11,6 +11,10 @@ import {
   createBrowserClientPageMetadataPublisher,
   type BrowserClientPageMetadataSnapshot
 } from './browser-client-page-metadata-publisher'
+import {
+  forgetBrowserClientPageMetadataReports,
+  reportUnpublishedBrowserClientPageMetadata
+} from './browser-client-page-metadata-reporting'
 import { attachBrowserClientPageToViewport } from './browser-client-page-renderer-installation'
 import { useBrowserClientHostedDownloadNotices } from './browser-client-hosted-download-notices'
 import { useBrowserClientHostedPopupNotices } from './browser-client-hosted-popup-notices'
@@ -216,7 +220,6 @@ export function ClientHostedBrowserPagePane({
     }
     const webview = attachment.webview
     const publisher = createBrowserClientPageMetadataPublisher({
-      environmentId: runtimeEnvironmentId,
       browserPageId: browserTab.id,
       placement: {
         kind: 'client',
@@ -225,7 +228,12 @@ export function ClientHostedBrowserPagePane({
         pageHostGeneration
       },
       nextRevision: attachment.nextMetadataRevision,
-      call: (args) => window.api.runtimeEnvironments.call(args)
+      publish: (params) =>
+        window.api.browser.publishClientPageMetadata({
+          environmentId: runtimeEnvironmentId,
+          params
+        }),
+      onUnpublished: (detail) => reportUnpublishedBrowserClientPageMetadata(browserTab.id, detail)
     })
     webviewRef.current = webview
     setAttachmentError(null)
@@ -303,6 +311,7 @@ export function ClientHostedBrowserPagePane({
         webviewRef.current = null
       }
       publisher.dispose()
+      forgetBrowserClientPageMetadataReports(browserTab.id)
       attachment.detach()
     }
   }, [

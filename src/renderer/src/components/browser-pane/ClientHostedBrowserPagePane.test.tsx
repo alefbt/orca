@@ -5,7 +5,7 @@ import type { BrowserPage } from '../../../../shared/browser-workspace-types'
 
 const mocks = vi.hoisted(() => ({
   attach: vi.fn(),
-  call: vi.fn(),
+  publishMetadata: vi.fn(),
   createBrowserTab: vi.fn(async () => true),
   addressBar: {
     current: null as {
@@ -57,9 +57,9 @@ import { ClientHostedBrowserPagePane } from './ClientHostedBrowserPagePane'
 describe('ClientHostedBrowserPagePane', () => {
   beforeEach(() => {
     mocks.attach.mockReset()
-    mocks.call.mockReset().mockResolvedValue({ ok: true, result: { accepted: true } })
+    mocks.publishMetadata.mockReset().mockResolvedValue({ status: 'published', accepted: true })
     // Download, popup and permission notices subscribe on mount; each has its own suite.
-    installClientHostedPaneApi({ runtimeEnvironments: { call: mocks.call } })
+    installClientHostedPaneApi({ browser: { publishClientPageMetadata: mocks.publishMetadata } })
   })
   afterEach(() => cleanup())
 
@@ -417,10 +417,9 @@ describe('ClientHostedBrowserPagePane', () => {
 
     act(() => webview.dispatchEvent(new Event('did-navigate')))
 
-    await vi.waitFor(() => expect(mocks.call).toHaveBeenCalledTimes(2))
-    expect(mocks.call).toHaveBeenLastCalledWith({
-      selector: 'environment-a',
-      method: 'browser.clientHost.pageMetadata',
+    await vi.waitFor(() => expect(mocks.publishMetadata).toHaveBeenCalledTimes(2))
+    expect(mocks.publishMetadata).toHaveBeenLastCalledWith({
+      environmentId: 'environment-a',
       params: {
         browserHostClientId: 'host-a',
         browserHostGeneration: 3,

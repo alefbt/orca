@@ -20,6 +20,10 @@ import { BrowserClientDownloadRelay } from './browser-client-download-relay'
 import { registerBrowserClientDownloadRouter } from './browser-client-download-routing'
 import { BrowserClientFileChannelTransport } from './browser-client-file-channel-transport'
 import { BrowserClientPageCommandExecutor } from './browser-client-page-command-executor'
+import {
+  BrowserClientPageMetadataTransport,
+  registerBrowserClientPageMetadataTransport
+} from './browser-client-page-metadata-transport'
 import { createBrowserClientPageGuestBinding } from './browser-client-page-guest-binding'
 import { browserManager } from './browser-manager'
 import { BrowserClientUploadStaging } from './browser-client-upload-staging'
@@ -84,8 +88,16 @@ const browserClientHosts =
         input.environmentId,
         downloadRelay
       )
+      const pageMetadata = new BrowserClientPageMetadataTransport()
+      const releaseMetadataRouting = registerBrowserClientPageMetadataTransport(
+        input.environmentId,
+        pageMetadata
+      )
       return new PairedRuntimeBrowserClientHostComposition({
-        onClosing: releaseDownloadRouting,
+        onClosing: () => {
+          releaseDownloadRouting()
+          releaseMetadataRouting()
+        },
         initialInput: input,
         createRoutes: (next, authority) =>
           createNetworkRoutes(next.pairing, authority, next.storageScope, input.environmentId),
@@ -131,6 +143,7 @@ const browserClientHosts =
             onError
           })
           fileChannel.bind(host)
+          pageMetadata.bind(host)
           return host
         },
         onError: (error) => retireFailedEnvironmentHost(input.environmentId, error)

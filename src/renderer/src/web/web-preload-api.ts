@@ -2349,6 +2349,8 @@ function createBrowserApi(): NonNullable<Partial<PreloadApi>['browser']> {
     openDevTools: () => Promise.resolve(false),
     setViewportOverride: () => Promise.resolve(false),
     setAnnotationViewportBridge: () => Promise.resolve(false),
+    // A web client never hosts pages, so it has no lease to publish over.
+    publishClientPageMetadata: () => Promise.resolve({ status: 'refused' as const }),
     onGuestLoadFailed: () => noopUnsubscribe,
     onCertificateFailureChanged: () => noopUnsubscribe,
     proceedCertificate: () => Promise.resolve({ ok: false, reason: 'missing' }),

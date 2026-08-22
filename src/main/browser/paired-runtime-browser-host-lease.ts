@@ -4,6 +4,7 @@ import {
   type BrowserClientHostCommandResult as BrowserClientHostCommandResultType,
   type BrowserClientHostLeaseAuthority
 } from '../../shared/browser-client-host-protocol'
+import { BROWSER_CLIENT_PAGE_METADATA_METHOD } from '../../shared/browser-client-page-metadata-protocol'
 import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
 import { assertBrowserClientHostAttachOptions } from './browser-client-host-attach-request'
 import {
@@ -73,6 +74,23 @@ export class PairedRuntimeBrowserHostLease {
 
   get fileChannelNegotiated(): boolean {
     return !this.closed && this.fileChannelActive
+  }
+
+  /**
+   * Why metadata rides the lease connection rather than an ordinary runtime call: the runtime binds
+   * page traffic to the connection the lease attached on, so any other transport is refused as a
+   * stale lease. Unlike the file channel this is not version-negotiated — an older runtime without
+   * the metadata method answers with an error the caller reports, not a wrong destination.
+   */
+  sendPageMetadataRequest(params: unknown, timeoutMs: number) {
+    const sendRequest = this.closed ? undefined : this.connection?.sendRequest
+    if (!sendRequest) {
+      throw new RemoteRuntimeClientError(
+        'remote_runtime_unavailable',
+        'Remote runtime browser host lease is unavailable.'
+      )
+    }
+    return sendRequest(BROWSER_CLIENT_PAGE_METADATA_METHOD, params, timeoutMs)
   }
 
   sendFileChannelRequest(method: string, params: unknown, timeoutMs: number) {

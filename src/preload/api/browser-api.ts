@@ -1,5 +1,9 @@
 import type { BrowserSetAnnotationViewportBridgeArgs } from '../../shared/browser-annotation-viewport-bridge'
 import type {
+  BrowserClientPageMetadataParams,
+  BrowserClientPageMetadataPublishOutcome
+} from '../../shared/browser-client-page-metadata-protocol'
+import type {
   BrowserWebAuthnAccountRequest,
   BrowserWebAuthnAccountResponse
 } from '../../shared/browser-webauthn-account'
@@ -74,6 +78,11 @@ export type BrowserApi = {
     override: BrowserViewportOverride | null
   }) => Promise<boolean>
   setAnnotationViewportBridge: (args: BrowserSetAnnotationViewportBridgeArgs) => Promise<boolean>
+  /** Publishes a client-hosted page's url/title to its runtime over that runtime's host lease. */
+  publishClientPageMetadata: (args: {
+    environmentId: string
+    params: BrowserClientPageMetadataParams
+  }) => Promise<BrowserClientPageMetadataPublishOutcome>
   onGuestLoadFailed: (
     callback: (args: { browserPageId: string; loadError: BrowserLoadError }) => void
   ) => () => void

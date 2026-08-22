@@ -33,3 +33,22 @@ export async function readHostBrowserPageIds(
   })
   return response.result.tabs.map((tab) => tab.browserPageId).sort()
 }
+
+/**
+ * Where the host believes one of its browser pages is.
+ *
+ * For a client-hosted page this is the record the client keeps current by publishing metadata, and
+ * it is the URL page recovery navigates a restored page back to — so it is the difference between
+ * restoring a tab and restoring it where the user actually was.
+ */
+export async function readHostBrowserPageUrl(
+  hostClient: RuntimeClient,
+  repoPath: string,
+  browserPageId: string
+): Promise<string | null> {
+  const response = await hostClient.call<{ tabs: { browserPageId: string; url: string }[] }>(
+    'browser.tabList',
+    { worktree: `path:${repoPath}` }
+  )
+  return response.result.tabs.find((tab) => tab.browserPageId === browserPageId)?.url ?? null
+}

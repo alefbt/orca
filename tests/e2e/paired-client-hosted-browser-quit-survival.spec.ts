@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net'
 import type { Page } from '@stablyai/playwright-test'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
-import { readHostBrowserPageIds } from './helpers/host-session-tabs'
+import { readHostBrowserPageIds, readHostBrowserPageUrl } from './helpers/host-session-tabs'
 import { cleanupE2EDaemons, closeElectronAppForE2E } from './helpers/electron-process-shutdown'
 import {
   launchPairedElectronClient,
@@ -17,18 +17,22 @@ const RECONNECT_GRACE_OVERSHOOT_MS = 25_000
 type MarkerFixture = {
   close(): Promise<void>
   markerUrl: string
+  /** A second page the guest can reach on its own, to tell "restored" from "restored where". */
+  movedUrl: string
+  origin: string
 }
 
-/** Serves one identifiable page, so a rendered marker proves the guest really navigated. */
+/** Serves identifiable pages, so a rendered marker proves the guest really navigated. */
 async function startMarkerFixture(): Promise<MarkerFixture> {
-  const server = createServer((_request, response) => {
+  const server = createServer((request, response) => {
+    const marker = request.url === '/moved' ? 'moved-on' : 'quit-survivor'
     response.writeHead(200, {
       'cache-control': 'no-store',
       'content-type': 'text/html; charset=utf-8'
     })
     response.end(
-      '<!doctype html><html><head><title>quit-survivor</title></head>' +
-        '<body><h1 id="marker">quit-survivor</h1></body></html>'
+      `<!doctype html><html><head><title>${marker}</title></head>` +
+        `<body><h1 id="marker">${marker}</h1></body></html>`
     )
   })
   await new Promise<void>((resolve, reject) => {
@@ -45,7 +49,34 @@ async function startMarkerFixture(): Promise<MarkerFixture> {
         server.closeAllConnections()
         server.close((error) => (error ? reject(error) : resolve()))
       }),
-    markerUrl: `${origin}/survivor`
+    markerUrl: `${origin}/survivor`,
+    movedUrl: `${origin}/moved`,
+    origin
+  }
+}
+
+/** Navigates the guest itself, the way following a link does — no client-side URL entry involved. */
+async function navigateGuest(page: Page, fromUrl: string, toUrl: string): Promise<void> {
+  const navigated = await page.evaluate(
+    async ({ fromUrl, toUrl }) => {
+      for (const candidate of document.querySelectorAll('webview')) {
+        const webview = candidate as Electron.WebviewTag
+        try {
+          if (!webview.getURL().startsWith(fromUrl)) {
+            continue
+          }
+          await webview.loadURL(toUrl)
+          return true
+        } catch {
+          // The guest may still be attaching.
+        }
+      }
+      return false
+    },
+    { fromUrl, toUrl }
+  )
+  if (!navigated) {
+    throw new Error(`No client-hosted guest was showing ${fromUrl} to navigate`)
   }
 }
 
@@ -269,6 +300,25 @@ test('keeps a client-hosted browser tab across a client quit and relaunch', asyn
       'the runtime must hold the client-hosted page before the quit'
     ).toContain(opened.remotePageId)
 
+    // Why the guest moves before the quit: with the tab still on its create URL, restoring to the
+    // create URL and restoring to where the user was are the same answer, and the test cannot tell
+    // a working restore from one that just replays the URL the tab was born on.
+    await navigateGuest(client.page, fixture.markerUrl, fixture.movedUrl)
+    expect(
+      await waitForRenderedClientWebview(
+        client.page,
+        fixture.movedUrl,
+        'the guest never rendered the page it navigated to'
+      )
+    ).toBe('moved-on')
+
+    await expect
+      .poll(() => readHostBrowserPageUrl(host.client, testRepoPath, opened.remotePageId), {
+        timeout: 60_000,
+        message: 'the runtime never learned where the guest navigated'
+      })
+      .toBe(fixture.movedUrl)
+
     // Quit without disposing: the profile has to outlive the app, as it does for a real Cmd+Q.
     const quitting = client.app
     client = null
@@ -290,20 +340,22 @@ test('keeps a client-hosted browser tab across a client quit and relaunch', asyn
     await selectPairedWorktreeGroup(client.page, client.environmentId, relaunchedWorktreeId)
 
     await expect
-      .poll(() => findMirroredBrowserPage(client!.page, relaunchedWorktreeId, fixture.markerUrl), {
+      .poll(() => findMirroredBrowserPage(client!.page, relaunchedWorktreeId, fixture.movedUrl), {
         timeout: 120_000,
-        message: 'the relaunched client never restored the client-hosted tab'
+        message: 'the relaunched client never restored the client-hosted tab where the guest was'
       })
       .not.toBeNull()
 
+    // Counted across the whole fixture origin, not just the moved URL: a restore that also replays
+    // the create URL leaves two rows, and matching only the moved one would call that a pass.
     const rows = await readClientBrowserRows(client.page, relaunchedWorktreeId)
-    const survivorRows = rows.filter((row) => row.url.startsWith(fixture.markerUrl))
+    const survivorRows = rows.filter((row) => row.url.startsWith(fixture.origin))
     expect(survivorRows, 'the restored tab must come back exactly once').toHaveLength(1)
 
     await expect
       .poll(
         async () =>
-          (await findMirroredBrowserPage(client!.page, relaunchedWorktreeId, fixture.markerUrl))
+          (await findMirroredBrowserPage(client!.page, relaunchedWorktreeId, fixture.movedUrl))
             ?.placementKind ?? null,
         {
           timeout: 120_000,
@@ -315,7 +367,7 @@ test('keeps a client-hosted browser tab across a client quit and relaunch', asyn
     const restored = await findMirroredBrowserPage(
       client.page,
       relaunchedWorktreeId,
-      fixture.markerUrl
+      fixture.movedUrl
     )
     expect(restored?.remotePageId, 'recovery must keep the page identity it was created with').toBe(
       opened.remotePageId
@@ -332,11 +384,11 @@ test('keeps a client-hosted browser tab across a client quit and relaunch', asyn
     expect(
       await waitForRenderedClientWebview(
         client.page,
-        fixture.markerUrl,
+        fixture.movedUrl,
         'the restored client-hosted tab never rendered its page again'
       ),
-      'a restored tab has to be functional, not just listed'
-    ).toBe('quit-survivor')
+      'a restored tab has to come back functional and where the user left it'
+    ).toBe('moved-on')
   } finally {
     await client?.dispose()
     if (abandonedProfile) {
