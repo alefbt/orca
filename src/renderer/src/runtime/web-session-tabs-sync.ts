@@ -60,6 +60,7 @@ import {
 import { resolvePaneAgentOwner } from '../../../shared/pane-agent-owner'
 import { resolveTerminalLayoutRoot } from './remote-terminal-layout-resolution'
 import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
+import { readBrowserClientHostId } from './browser-client-host-identity'
 import {
   clearWebSessionFocusIntent,
   clearWebSessionFocusIntentsForOwner,
@@ -1621,8 +1622,9 @@ function browserWorkspaceHasRemoteEnvironmentPage(
  * Neither says anything the local row does not already say better, so while the page still sits at
  * the url this client gave it, the local title stands and only a real navigation replaces it.
  *
- * Scope: the pre-adoption/staged window, and every placement the host actually drives. Adopted
- * client-placed rows never reach here — see resolveMirroredBrowserPageContent.
+ * Scope: the pre-adoption/staged window, every placement the host actually drives, and the mirror
+ * of a page some other client hosts. Rows whose guest is ours never reach here — see
+ * resolveMirroredBrowserPageContent.
  */
 function resolveMirroredBrowserTitle(
   tab: RuntimeMobileSessionBrowserTab,
@@ -1638,22 +1640,37 @@ function resolveMirroredBrowserTitle(
 }
 
 /**
- * A client-placed page's content lives in this client's own guest webview; the host only ever
- * learns it second-hand through a fire-and-forget metadata publish, so its snapshot is a stale
- * echo at best and the registry's `'Browser'`/create-time defaults at worst. Once a local row
- * exists it is the truth, exactly as it already is for loadError and certificateFailure.
+ * Whether the guest running this page is one of ours. `placement.kind === 'client'` says only that
+ * *some* client hosts it: a second desktop, or the web client that installs no page renderer at
+ * all, mirrors the same row with nothing of its own to see it with. The placement names the lease
+ * holder, so the comparison is exact, and it holds from the moment the host mints the placement —
+ * before our guest has attached — which is the window the title would otherwise flicker through.
+ */
+function clientHostsMirroredBrowserPage(tab: RuntimeMobileSessionBrowserTab): boolean {
+  if (tab.placement?.kind !== 'client') {
+    return false
+  }
+  const hostClientId = readBrowserClientHostId()
+  return hostClientId !== null && tab.placement.browserHostClientId === hostClientId
+}
+
+/**
+ * A page hosted by this client lives in our own guest webview; the host only ever learns its
+ * content second-hand through a fire-and-forget metadata publish, so its snapshot is a stale echo
+ * at best and the registry's `'Browser'`/create-time defaults at worst. Once a local row exists it
+ * is the truth.
  *
  * The url is part of the payload and not just a symptom: rewinding it to the host's create-time
  * value is what breaks the staged-title hold's url-equality arm on the following snapshot.
  *
- * A row with no local truth (fresh mirror on another client, reload restore) still takes the host
- * values — that client has no guest of its own, so a stale echo beats nothing.
+ * Every other row keeps taking the host values — a client that hosts no guest has no second
+ * opinion to offer, and freezing its mirror would strand it on whatever its first snapshot said.
  */
 function resolveMirroredBrowserPageContent(
   tab: RuntimeMobileSessionBrowserTab,
   existingPage: BrowserPage | undefined
 ): Pick<BrowserPage, 'url' | 'title' | 'loading' | 'canGoBack' | 'canGoForward'> {
-  if (tab.placement?.kind === 'client' && existingPage) {
+  if (clientHostsMirroredBrowserPage(tab) && existingPage) {
     return {
       url: existingPage.url,
       title: existingPage.title,

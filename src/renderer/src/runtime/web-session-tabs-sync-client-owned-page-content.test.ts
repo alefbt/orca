@@ -1,9 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserPage, BrowserWorkspace } from '../../../shared/browser-workspace-types'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import type { Tab } from '../../../shared/tab-types'
 import type { RuntimeBrowserClientPlacement } from '../../../shared/runtime-browser-placement'
-import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
+import {
+  applyWebSessionTabsSnapshot,
+  resolveHostSessionTabIdForWebSessionTab,
+  type WebSessionTabsSyncState
+} from './web-session-tabs-sync'
+import { resetBrowserClientHostIdForTests } from './browser-client-host-identity'
 import {
   ENV,
   NOW,
@@ -26,11 +31,28 @@ const LOCAL_PAGE = 'local-browser-page'
 const LOCAL_UNIFIED_TAB = 'local-browser-unified'
 const GROUP = 'host-group-1'
 
+const THIS_CLIENT = 'browser-host-a'
+const OTHER_CLIENT = 'browser-host-b'
+
 const CLIENT_PLACEMENT: RuntimeBrowserClientPlacement = {
   kind: 'client',
-  browserHostClientId: 'browser-host-a',
+  browserHostClientId: THIS_CLIENT,
   browserHostGeneration: 1,
   pageHostGeneration: 1
+}
+
+/**
+ * Stands this client up as the given browser host, or — for null — as one that hosts no guests at
+ * all: the web client's api has a browser namespace, it just cannot answer this.
+ */
+function hostingClient(browserHostClientId: string | null): void {
+  vi.stubGlobal(
+    'api',
+    browserHostClientId === null
+      ? { browser: {} }
+      : { browser: { readClientHostId: () => browserHostClientId } }
+  )
+  resetBrowserClientHostIdForTests()
 }
 
 /** Where the local guest actually is after the user navigated it. */
@@ -39,6 +61,11 @@ const GUEST_TITLE = 'Google Maps'
 /** What the host still believes: the create-time url, and the registry's untouched title default. */
 const HOST_STALE_URL = 'https://maps.google.com/'
 const HOST_FALLBACK_TITLE = 'Browser'
+/** Where the guest goes next, while the host keeps republishing the same stale row. */
+const MOVED_GUEST_URL = 'https://www.google.com/maps/place/Ferry+Building'
+const MOVED_GUEST_TITLE = 'Ferry Building'
+/** Submitted against a page the host had not minted yet, so the row moved before the guest did. */
+const DEFERRED_URL = 'https://example.internal/deferred'
 
 /** The local row as the guest webview left it: navigated, settled, one entry of history behind it. */
 function localPage(overrides: Partial<BrowserPage> = {}): BrowserPage {
@@ -120,7 +147,8 @@ function stateWithLocalRow(page: BrowserPage = localPage()): WebSessionTabsSyncS
 
 /** The snapshot the host republishes on tab focus / workspace switch, frozen at create time. */
 function staleHostSnapshot(
-  overrides: Partial<RuntimeMobileSessionTabsResult['tabs'][number] & { placement: unknown }> = {}
+  overrides: Partial<RuntimeMobileSessionTabsResult['tabs'][number] & { placement: unknown }> = {},
+  snapshotOverrides: Partial<RuntimeMobileSessionTabsResult> = {}
 ): RuntimeMobileSessionTabsResult {
   return makeSnapshot(
     [
@@ -139,8 +167,23 @@ function staleHostSnapshot(
         ...overrides
       } as RuntimeMobileSessionTabsResult['tabs'][number]
     ],
-    { activeTabId: HOST_TAB, activeTabType: 'browser' }
+    { activeTabId: HOST_TAB, activeTabType: 'browser', ...snapshotOverrides }
   )
+}
+
+/** The same page one snapshot later, with the host caught up to where the guest actually is. */
+function movedHostSnapshot(): RuntimeMobileSessionTabsResult {
+  return staleHostSnapshot(
+    { title: GUEST_TITLE, url: GUEST_URL, loading: false, canGoBack: true, canGoForward: true },
+    { snapshotVersion: 2 }
+  )
+}
+
+function mergePatch(
+  state: WebSessionTabsSyncState,
+  patch: Partial<WebSessionTabsSyncState>
+): WebSessionTabsSyncState {
+  return { ...state, ...patch }
 }
 
 function applyStaleSnapshot(
@@ -162,8 +205,32 @@ function syncedPage(
   return (patch.browserPagesByWorkspace ?? state.browserPagesByWorkspace)[workspaceId]?.[0]
 }
 
-describe('client-placed browser rows own their page content', () => {
-  beforeEach(resetWebSessionTabsSyncTestState)
+/** What the pane writes to the local row when the guest finishes a navigation. */
+function guestNavigated(
+  state: WebSessionTabsSyncState,
+  url: string,
+  title: string
+): WebSessionTabsSyncState {
+  const page = state.browserPagesByWorkspace[LOCAL_WORKSPACE]?.[0]
+  if (!page) {
+    throw new Error('guestNavigated needs a local row')
+  }
+  return {
+    ...state,
+    browserPagesByWorkspace: { [LOCAL_WORKSPACE]: [{ ...page, url, title }] }
+  }
+}
+
+describe('browser rows this client hosts own their page content', () => {
+  beforeEach(() => {
+    resetWebSessionTabsSyncTestState()
+    hostingClient(THIS_CLIENT)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    resetBrowserClientHostIdForTests()
+  })
 
   // The reported bug: host title is the registry's 'Browser' default and its url never moved off
   // create time, so the staged-title hold's url-equality arm fails the moment the guest navigates.
@@ -258,6 +325,111 @@ describe('client-placed browser rows own their page content', () => {
     const patch = applyStaleSnapshot(stateWithLocalRow())
 
     expect(patch.browserPagesByWorkspace?.[LOCAL_WORKSPACE]).toBeUndefined()
+  })
+
+  // Why two snapshots and not one: every client holds a local row from its first snapshot onward,
+  // so a predicate that asks only whether a row exists cannot tell a mirror from a host until the
+  // second one arrives — and by then the mirror it froze is a permanent one.
+  it.each([
+    ['a second desktop client', OTHER_CLIENT],
+    ['a client that hosts no guest at all', null]
+  ])('keeps tracking the host on %s', (_label, browserHostClientId) => {
+    hostingClient(browserHostClientId)
+    const first = makeState()
+    const afterFirst = mergePatch(first, applyStaleSnapshot(first))
+    const afterSecond = mergePatch(afterFirst, applyStaleSnapshot(afterFirst, movedHostSnapshot()))
+
+    expect(afterSecond.browserPagesByWorkspace[REMOTE_PAGE]?.[0]).toMatchObject({
+      title: GUEST_TITLE,
+      url: GUEST_URL,
+      loading: false,
+      canGoBack: true,
+      canGoForward: true
+    })
+  })
+
+  // The other side of that boundary: the same placement, the same two snapshots, and the only
+  // difference is that the guest is this client's — so here the host's echo must lose.
+  it('keeps the guest truth across repeated snapshots on the client hosting the page', () => {
+    const first = stateWithLocalRow()
+    const afterFirst = mergePatch(first, applyStaleSnapshot(first))
+    const navigated = guestNavigated(afterFirst, MOVED_GUEST_URL, MOVED_GUEST_TITLE)
+    const afterSecond = mergePatch(
+      navigated,
+      applyStaleSnapshot(navigated, staleHostSnapshot({}, { snapshotVersion: 2 }))
+    )
+
+    expect(afterSecond.browserPagesByWorkspace[LOCAL_WORKSPACE]?.[0]).toMatchObject({
+      title: MOVED_GUEST_TITLE,
+      url: MOVED_GUEST_URL
+    })
+  })
+
+  // Why a mirror still needs the host's own title hold: taking host content is not the same as
+  // taking whatever string the projection emitted, and the fallback is one of its outputs.
+  it('holds a mirrored title rather than showing the host fallback at the same url', () => {
+    hostingClient(OTHER_CLIENT)
+    const first = makeState()
+    const afterFirst = mergePatch(first, applyStaleSnapshot(first, movedHostSnapshot()))
+    const afterSecond = mergePatch(
+      afterFirst,
+      applyStaleSnapshot(afterFirst, staleHostSnapshot({ url: GUEST_URL }, { snapshotVersion: 3 }))
+    )
+
+    expect(afterSecond.browserPagesByWorkspace[REMOTE_PAGE]?.[0]?.title).toBe(GUEST_TITLE)
+  })
+
+  // Why an explicit server placement and not just an absent one: mixed versions really do publish
+  // it, and an absence-only test cannot tell a client check apart from a placement check.
+  it('takes host content for an explicitly server-placed page with a local row', () => {
+    const state = stateWithLocalRow()
+    const patch = applyStaleSnapshot(state, staleHostSnapshot({ placement: { kind: 'server' } }))
+
+    expect(syncedPage(patch, state)).toMatchObject({
+      title: HOST_FALLBACK_TITLE,
+      url: HOST_STALE_URL,
+      loading: true,
+      canGoBack: false,
+      canGoForward: false
+    })
+  })
+
+  // Why the very first placement-bearing snapshot: between the host minting the placement and this
+  // client's guest attaching to it, the host publishes its create-time row and the guest cannot yet
+  // answer. Ownership that waited for the attachment would spend that whole gap taking the host's
+  // 'Browser', which is the flicker. The row here has already moved off the create url — a url the
+  // user submitted while the page was still staged — so the staged-title hold cannot cover it.
+  it('owns the row from the snapshot that adopts it, before any guest has attached', () => {
+    const staged = localPage({ url: DEFERRED_URL, title: DEFERRED_URL })
+    const state = makeState({
+      browserTabsByWorktree: { [WT]: [localWorkspace(staged)] },
+      browserPagesByWorkspace: { [LOCAL_WORKSPACE]: [staged] },
+      remoteBrowserPageHandlesByPageId: {
+        [staged.id]: { environmentId: ENV, remotePageId: REMOTE_PAGE, staged: true }
+      },
+      unifiedTabsByWorktree: { [WT]: [localUnifiedTab(staged)] }
+    })
+
+    expect(syncedPage(applyStaleSnapshot(state), state)).toMatchObject({
+      url: DEFERRED_URL,
+      title: DEFERRED_URL
+    })
+  })
+
+  // Why a mapping and not a field: an owned row emits no page patch at all, so every value
+  // assertion here reads through to the seeded state and would pass just as well if the row had
+  // been dropped from the mirror entirely. The host tab id is only recorded for rows that survive.
+  it('still mirrors the row it declines to overwrite', () => {
+    const state = stateWithLocalRow()
+    applyStaleSnapshot(state)
+
+    expect(
+      resolveHostSessionTabIdForWebSessionTab(state, {
+        environmentId: ENV,
+        worktreeId: WT,
+        tabId: LOCAL_UNIFIED_TAB
+      })
+    ).toBe(HOST_TAB)
   })
 
   // The staged-title hold still owns the pre-adoption window and every non-client placement.
