@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   removeHandlerMock,
   handleMock,
+  onMock,
+  removeAllListenersMock,
   registerGuestMock,
   attachGuestPoliciesMock,
   unregisterGuestMock,
@@ -20,6 +22,8 @@ const {
 } = vi.hoisted(() => ({
   removeHandlerMock: vi.fn(),
   handleMock: vi.fn(),
+  onMock: vi.fn(),
+  removeAllListenersMock: vi.fn(),
   registerGuestMock: vi.fn(),
   attachGuestPoliciesMock: vi.fn(),
   unregisterGuestMock: vi.fn(),
@@ -42,11 +46,17 @@ vi.mock('electron', () => ({
   },
   ipcMain: {
     removeHandler: removeHandlerMock,
-    handle: handleMock
+    handle: handleMock,
+    on: onMock,
+    removeAllListeners: removeAllListenersMock
   },
   webContents: {
     fromId: webContentsFromIdMock
   }
+}))
+
+vi.mock('../browser/paired-runtime-browser-client-host-runtime', () => ({
+  getBrowserClientHostId: () => 'browser-host-a'
 }))
 
 vi.mock('../browser/browser-manager', () => ({
@@ -68,6 +78,7 @@ vi.mock('../browser/browser-manager', () => ({
   }
 }))
 
+import { BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL } from '../../shared/browser-client-page-renderer-protocol'
 import { registerBrowserHandlers, setAgentBrowserBridgeRef } from './browser'
 import {
   waitForAnyTabRegistration,
@@ -80,6 +91,8 @@ describe('registerBrowserHandlers', () => {
     vi.stubEnv('ELECTRON_RENDERER_URL', '')
     removeHandlerMock.mockReset()
     handleMock.mockReset()
+    onMock.mockReset()
+    removeAllListenersMock.mockReset()
     registerGuestMock.mockReset()
     registerGuestMock.mockReturnValue(true)
     attachGuestPoliciesMock.mockReset()
@@ -106,6 +119,30 @@ describe('registerBrowserHandlers', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs()
+  })
+
+  // Why the untrusted case matters as much as the happy one: the renderer treats a null as "not
+  // mine yet" and keeps asking, so a wrong answer here is worse than no answer.
+  it.each([
+    ['the trusted renderer', 'window', 'browser-host-a'],
+    ['a guest webview', 'webview', null]
+  ])('answers the client host id for %s', (_label, senderType, expected) => {
+    registerBrowserHandlers()
+
+    const listener = onMock.mock.calls.find(
+      ([channel]) => channel === BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL
+    )?.[1] as (event: { returnValue: unknown; sender: Electron.WebContents }) => void
+    const event = {
+      returnValue: undefined as unknown,
+      sender: {
+        isDestroyed: () => false,
+        getType: () => senderType,
+        getURL: () => 'file:///app/index.html'
+      } as Electron.WebContents
+    }
+    listener(event)
+
+    expect(event.returnValue).toBe(expected)
   })
 
   it('rejects non-window callers', async () => {

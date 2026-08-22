@@ -266,6 +266,7 @@ import {
 } from '../shared/keyboard-layout-events'
 import { createBrowserFindSubscriptions } from './browser-find-subscriptions'
 import { createBrowserClientPageRendererRequests } from './browser-client-page-renderer-requests'
+import { BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL } from '../shared/browser-client-page-renderer-protocol'
 import { createUsageProviderApi } from './usage-provider-api'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type { ExecutionHostId } from '../shared/execution-host'
@@ -2681,6 +2682,8 @@ const api = {
 
   browser: {
     onClientPageRendererRequest: browserClientPageRendererRequests.subscribe,
+    readClientHostId: (): string | null =>
+      (ipcRenderer.sendSync(BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL) as string | null) ?? null,
     registerGuest: (args: {
       browserPageId: string
       workspaceId: string

@@ -40,6 +40,8 @@ import type {
 } from '../../shared/browser-client-page-renderer-protocol'
 
 export type BrowserApi = {
+  /** Absent wherever this client hosts no guests of its own, which is how the web client reads. */
+  readClientHostId?: () => string | null
   onClientPageRendererRequest?: (
     callback: (
       request: BrowserClientPageRendererRequest

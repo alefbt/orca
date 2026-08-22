@@ -59,6 +59,15 @@ type ProductionBrowserClientHostStart = PairedRuntimeBrowserClientHostStart & {
 }
 
 const browserHostClientId = randomUUID()
+
+/**
+ * The id every lease this app takes out is minted under, and therefore the id a page's placement
+ * carries when the guest runs in this app's own renderer rather than another client's.
+ */
+export function getBrowserClientHostId(): string {
+  return browserHostClientId
+}
+
 let activeOrcaProfileId: string | null = null
 /** Route identity of each live client host, for storage operations without a page. */
 const clientHostRouteIdentities = new Map<string, ClientHostRouteIdentity>()
