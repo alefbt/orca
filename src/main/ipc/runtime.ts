@@ -8,6 +8,7 @@ import type {
   RuntimeTerminalDriverState
 } from '../../shared/runtime-types'
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
+import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-browser-rows'
 import { TERMINAL_FIT_RESTORE_DEADLINE_MS } from '../../shared/terminal-fit-restore-deadline'
 import { RpcDispatcher } from '../runtime/rpc/dispatcher'
 
@@ -100,6 +101,12 @@ export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
         driver
       }))
     }
+  )
+
+  // Why: the renderer holds these rows in memory only, so a reload has nothing to restore from.
+  ipcMain.removeHandler('runtime:getClientHostedBrowserRows')
+  ipcMain.handle('runtime:getClientHostedBrowserRows', (): ClientHostedBrowserRowsEvent[] =>
+    runtime.listClientHostedBrowserRows()
   )
 
   // Why: the desktop "Restore" button sets the display mode to 'desktop' and

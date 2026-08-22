@@ -2672,6 +2672,10 @@ void app.whenReady().then(async () => {
     retireAgentHookCompatibilityAuthority: (paneKey) =>
       agentHookServer.retirePaneAuthority(paneKey),
     canRecoverPersistentLocalPtys: () => getDaemonProvider() !== null,
+    // Why: evaluated per call, not captured — the RPC server that owns the device registry is
+    // constructed with this runtime and does not exist yet at this point.
+    getPairedDeviceName: (pairedDeviceId) =>
+      runtimeRpc?.getDeviceRegistry()?.getDevice(pairedDeviceId)?.name ?? null,
     // Why: source codex-home here (runs in window AND serve) so aiVault.listSessions includes managed-Codex sessions; registerCoreHandlers is window-only.
     getAdditionalAiVaultCodexHomePaths: () =>
       codexRuntimeHome ? codexRuntimeHome.getHostCodexHomePathsForSessionDiscovery() : [],

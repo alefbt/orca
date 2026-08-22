@@ -1433,12 +1433,16 @@ function createRuntimeApi(): NonNullable<Partial<PreloadApi>['runtime']> {
     getTerminalFitOverrides: () => Promise.resolve([]),
     getTerminalDrivers: () => Promise.resolve([]),
     getBrowserDrivers: () => Promise.resolve([]),
+    // Why: client-hosted rows describe pages a paired desktop renders for a host; the web client
+    // is never that host.
+    getClientHostedBrowserRows: () => Promise.resolve([]),
     restoreTerminalFit: () => Promise.resolve({ restored: false }),
     reclaimBrowserForDesktop: () => Promise.resolve({ reclaimed: false }),
     onTerminalFitOverrideChanged: () => noopUnsubscribe,
     onTerminalDriverChanged: () => noopUnsubscribe,
     onNativeChatLaunchDraftResolved: () => noopUnsubscribe,
-    onBrowserDriverChanged: () => noopUnsubscribe
+    onBrowserDriverChanged: () => noopUnsubscribe,
+    onClientHostedBrowserRowsChanged: () => noopUnsubscribe
   }
 }
 

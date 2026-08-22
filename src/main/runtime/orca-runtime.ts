@@ -654,6 +654,8 @@ import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
 import { getBrowserHostLeaseRegistry } from './browser-host-lease-registry-instance'
 import { getRuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
+import { ClientHostedBrowserRowPublisher } from './client-hosted-browser-row-publication'
+import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-browser-rows'
 import { closeClientHostedBrowserPagesForWorktree } from './worktree-browser-client-page-close'
 import {
   routeRuntimeBrowserClientAutomation,
@@ -2263,6 +2265,10 @@ type RuntimeNotifier = {
     resolution: { text: string; createdAt: number }
   ): void
   browserDriverChanged?(browserPageId: string, driver: RuntimeBrowserDriverState): void
+  // Why: pages placed on a paired client never reach the host renderer's tab model, so the host
+  // has no row for them unless main pushes one. Ephemeral and host-local — see
+  // src/shared/client-hosted-browser-rows.ts.
+  clientHostedBrowserRowsChanged?(event: ClientHostedBrowserRowsEvent): void
 }
 
 type TerminalHandleRecord = {
@@ -3631,6 +3637,7 @@ export class OrcaRuntimeService {
     | null
   private readonly retireAgentHookCompatibilityAuthorityFn: ((paneKey: string) => void) | null
   private readonly canRecoverPersistentLocalPtysFn: () => boolean
+  private readonly getPairedDeviceNameFn: (pairedDeviceId: string) => string | null
   private readonly buildAgentHookPtyEnv: (() => Record<string, string>) | null
   private readonly getDesktopWindowStatusFn: () => RuntimeDesktopWindowStatus
   private readonly prepareAiVaultSessionResumeFn:
@@ -3711,6 +3718,9 @@ export class OrcaRuntimeService {
       }) => AgentHookAuthorityAttestation | null
       retireAgentHookCompatibilityAuthority?: (paneKey: string) => void
       canRecoverPersistentLocalPtys?: () => boolean
+      // Why: the device registry lives on the RPC server, which is constructed with this runtime;
+      // a closure defers the lookup past that ordering instead of inverting ownership.
+      getPairedDeviceName?: (pairedDeviceId: string) => string | null
       // Why: codex-home paths for the Agent Session History scan must be sourced
       // here, not via the window-only registerCoreHandlers path — that path never
       // runs under `orca serve`, so remote/SSH hosts would silently drop
@@ -3753,6 +3763,7 @@ export class OrcaRuntimeService {
     this.retireAgentHookCompatibilityAuthorityFn =
       deps?.retireAgentHookCompatibilityAuthority ?? null
     this.canRecoverPersistentLocalPtysFn = deps?.canRecoverPersistentLocalPtys ?? (() => true)
+    this.getPairedDeviceNameFn = deps?.getPairedDeviceName ?? (() => null)
     // Why: configure the shared AiVault scan cache from a serve-mode-reachable
     // seam so the aiVault.listSessions RPC includes managed-Codex + WSL sessions
     // even on headless `orca serve` hosts where registerCoreHandlers never runs.
@@ -9472,6 +9483,9 @@ export class OrcaRuntimeService {
 
   // Public so runtime-side page release (lease fencing) can prune a tab whose page is gone.
   retireRuntimeOwnedBrowserSessionTab(worktreeId: string, browserPageId: string): void {
+    // Why: before the snapshot guard — worktree removal drops the snapshot first, and the host
+    // rows for its client pages would otherwise be stranded on screen with nothing to retract them.
+    this.clientHostedBrowserRows.publish(worktreeId)
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     if (!snapshot) {
       return
@@ -33468,6 +33482,22 @@ export class OrcaRuntimeService {
     return `${normalizedPublicationEpoch}:headless-merge:${signature}`
   }
 
+  private readonly clientHostedBrowserRows = new ClientHostedBrowserRowPublisher({
+    listClientPages: (worktreeId) => getRuntimeBrowserPageRegistry(this).listPages(worktreeId),
+    hasLivePlacement: (browserPageId) =>
+      getBrowserHostLeaseRegistry(this).getPlacement(browserPageId) !== undefined,
+    resolveDeviceName: (pairedDeviceId) => this.getPairedDeviceNameFn(pairedDeviceId),
+    getEmitter: () => {
+      const notifier = this.notifier
+      const send = notifier?.clientHostedBrowserRowsChanged
+      return send ? (event) => send.call(notifier, event) : null
+    }
+  })
+
+  listClientHostedBrowserRows(): ClientHostedBrowserRowsEvent[] {
+    return this.clientHostedBrowserRows.snapshot()
+  }
+
   private notifyMobileSessionTabsRemoved(worktreeId: string): void {
     const removed: RuntimeMobileSessionTabsRemovedResult = {
       worktree: worktreeId,
@@ -33489,9 +33519,13 @@ export class OrcaRuntimeService {
 
   notifyMobileSessionTabsChanged(worktreeId?: string): void {
     if (!worktreeId) {
+      this.clientHostedBrowserRows.publishAll()
       this.notifyMobileSessionTabSnapshots()
       return
     }
+    // Why: every client-page mutation — create, navigate, metadata, host quit, recovery — reaches
+    // this announcement, so the host's own rows derive from it rather than from a second seam.
+    this.clientHostedBrowserRows.publish(worktreeId)
     const hasClientBrowserPages =
       getRuntimeBrowserPageRegistry(this).listPages(worktreeId).length > 0
     if (this.offscreenBrowserBackend || hasClientBrowserPages) {

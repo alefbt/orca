@@ -6,6 +6,7 @@ import type {
   RuntimeTerminalDriverState
 } from '../../shared/runtime-types'
 import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
+import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-browser-rows'
 import type { PublicKnownRuntimeEnvironment } from '../../shared/runtime-environments'
 import type { VerifyAndAddRuntimeEnvironmentResult } from '../../shared/remote-pairing-verification'
 import type {
@@ -40,6 +41,7 @@ export type RuntimeApi = {
         driver: RuntimeBrowserDriverState
       }[]
     >
+    getClientHostedBrowserRows: () => Promise<ClientHostedBrowserRowsEvent[]>
     restoreTerminalFit: (ptyId: string) => Promise<{ restored: boolean }>
     reclaimBrowserForDesktop: (browserPageId: string) => Promise<{ reclaimed: boolean }>
     onTerminalFitOverrideChanged: (
@@ -58,6 +60,9 @@ export type RuntimeApi = {
     ) => () => void
     onBrowserDriverChanged: (
       callback: (event: { browserPageId: string; driver: RuntimeBrowserDriverState }) => void
+    ) => () => void
+    onClientHostedBrowserRowsChanged: (
+      callback: (event: ClientHostedBrowserRowsEvent) => void
     ) => () => void
   }
   runtimeEnvironments: {

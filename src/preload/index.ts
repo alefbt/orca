@@ -167,6 +167,7 @@ import type {
   SkillUpdateRun,
   SkillUpdateStartResult
 } from '../shared/skill-freshness'
+import type { ClientHostedBrowserRowsEvent } from '../shared/client-hosted-browser-rows'
 import type {
   RuntimeBrowserDriverState,
   RuntimeMobileSessionTabMove,
@@ -4551,6 +4552,8 @@ const api = {
         driver: RuntimeBrowserDriverState
       }[]
     > => ipcRenderer.invoke('runtime:getBrowserDrivers'),
+    getClientHostedBrowserRows: (): Promise<ClientHostedBrowserRowsEvent[]> =>
+      ipcRenderer.invoke('runtime:getClientHostedBrowserRows'),
     restoreTerminalFit: (ptyId: string): Promise<{ restored: boolean }> =>
       ipcRenderer.invoke('runtime:restoreTerminalFit', { ptyId }),
     reclaimBrowserForDesktop: (browserPageId: string): Promise<{ reclaimed: boolean }> =>
@@ -4610,6 +4613,14 @@ const api = {
       ) => callback(data)
       ipcRenderer.on('runtime:browserDriverChanged', listener)
       return () => ipcRenderer.removeListener('runtime:browserDriverChanged', listener)
+    },
+    onClientHostedBrowserRowsChanged: (
+      callback: (event: ClientHostedBrowserRowsEvent) => void
+    ): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: ClientHostedBrowserRowsEvent) =>
+        callback(data)
+      ipcRenderer.on('runtime:clientHostedBrowserRowsChanged', listener)
+      return () => ipcRenderer.removeListener('runtime:clientHostedBrowserRowsChanged', listener)
     }
   },
 
