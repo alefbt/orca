@@ -346,3 +346,56 @@ test('keeps a client-hosted browser tab across a client quit and relaunch', asyn
     await fixture.close()
   }
 })
+
+// Why: retention is only safe if a retained tab can still be dismissed. The comment that justified
+// retiring on a fence warned the tab would otherwise stay listed and un-closeable for the life of
+// the runtime, so that warning is the acceptance criterion for keeping it.
+test('closes a retained client-hosted tab while its host is gone', async ({
+  testRepoPath
+}, testInfo) => {
+  test.setTimeout(420_000)
+  const fixture = await startMarkerFixture()
+  const host = await launchHeadlessPairedRuntimeHost()
+  let client: PairedElectronClient | null = null
+  let abandonedProfile: string | null = null
+  try {
+    await host.client.call('repo.add', { path: testRepoPath, kind: 'git' })
+    client = await launchPairedElectronClient(host.offer, testInfo, CLIENT_NAME)
+    const profileDir = client.userDataDir
+    const worktreeId = await waitForPairedWorktreeId(client.page, testRepoPath)
+    await selectPairedWorktreeGroup(client.page, client.environmentId, worktreeId)
+    const opened = await openClientHostedFixturePage(client, worktreeId, fixture.markerUrl)
+    await waitForRenderedClientWebview(
+      client.page,
+      fixture.markerUrl,
+      'client-hosted guest never rendered the fixture before the quit'
+    )
+
+    const quitting = client.app
+    client = null
+    abandonedProfile = profileDir
+    await closeElectronAppForE2E(quitting)
+    await new Promise((resolve) => setTimeout(resolve, RECONNECT_GRACE_OVERSHOOT_MS))
+    expect(await readHostBrowserPageIds(host.client, testRepoPath)).toContain(opened.remotePageId)
+
+    await expect(
+      host.client.call('browser.tabClose', {
+        worktree: `path:${testRepoPath}`,
+        page: opened.remotePageId
+      }),
+      'a retained tab must close without its absent host answering'
+    ).resolves.toMatchObject({ result: { closed: true } })
+
+    expect(
+      await readHostBrowserPageIds(host.client, testRepoPath),
+      'the closed tab must leave the runtime for good'
+    ).not.toContain(opened.remotePageId)
+  } finally {
+    await client?.dispose()
+    if (abandonedProfile) {
+      await cleanupE2EDaemons(abandonedProfile).catch(() => undefined)
+    }
+    await host.dispose()
+    await fixture.close()
+  }
+})
