@@ -54,6 +54,8 @@ function localPage(overrides: Partial<BrowserPage> = {}): BrowserPage {
     canGoForward: true,
     loadError: null,
     createdAt: NOW - 10,
+    browserRuntimeEnvironmentId: ENV,
+    viewportPresetId: null,
     ...overrides
   }
 }
@@ -148,8 +150,16 @@ function applyStaleSnapshot(
   return applyWebSessionTabsSnapshot(state, snapshot, ENV, NOW) as Partial<WebSessionTabsSyncState>
 }
 
-function syncedPage(patch: Partial<WebSessionTabsSyncState>): BrowserPage | undefined {
-  return patch.browserPagesByWorkspace?.[LOCAL_WORKSPACE]?.[0]
+/**
+ * An omitted patch key means unchanged, and an owned row that the snapshot leaves alone omits it
+ * entirely — so read through to the seeded state rather than asserting on the diff.
+ */
+function syncedPage(
+  patch: Partial<WebSessionTabsSyncState>,
+  state: WebSessionTabsSyncState,
+  workspaceId = LOCAL_WORKSPACE
+): BrowserPage | undefined {
+  return (patch.browserPagesByWorkspace ?? state.browserPagesByWorkspace)[workspaceId]?.[0]
 }
 
 describe('client-placed browser rows own their page content', () => {
@@ -158,60 +168,66 @@ describe('client-placed browser rows own their page content', () => {
   // The reported bug: host title is the registry's 'Browser' default and its url never moved off
   // create time, so the staged-title hold's url-equality arm fails the moment the guest navigates.
   it('keeps the local title when a stale host snapshot republishes the Browser fallback', () => {
-    const patch = applyStaleSnapshot(stateWithLocalRow())
+    const state = stateWithLocalRow()
 
-    expect(syncedPage(patch)?.title).toBe(GUEST_TITLE)
+    expect(syncedPage(applyStaleSnapshot(state), state)?.title).toBe(GUEST_TITLE)
   })
 
   it('keeps the local title on the workspace and the unified tab label', () => {
-    const patch = applyStaleSnapshot(stateWithLocalRow())
+    const state = stateWithLocalRow()
+    const patch = applyStaleSnapshot(state)
 
-    expect(patch.browserTabsByWorktree?.[WT]?.[0]?.title).toBe(GUEST_TITLE)
+    expect((patch.browserTabsByWorktree ?? state.browserTabsByWorktree)[WT]?.[0]?.title).toBe(
+      GUEST_TITLE
+    )
     expect(
-      patch.unifiedTabsByWorktree?.[WT]?.find((tab) => tab.contentType === 'browser')?.label
+      (patch.unifiedTabsByWorktree ?? state.unifiedTabsByWorktree)[WT]?.find(
+        (tab) => tab.contentType === 'browser'
+      )?.label
     ).toBe(GUEST_TITLE)
   })
 
   it('keeps the local url instead of rewinding to the host create-time url', () => {
-    const patch = applyStaleSnapshot(stateWithLocalRow())
+    const state = stateWithLocalRow()
 
-    expect(syncedPage(patch)?.url).toBe(GUEST_URL)
+    expect(syncedPage(applyStaleSnapshot(state), state)?.url).toBe(GUEST_URL)
   })
 
   it('keeps the local loading flag instead of the host create-time value', () => {
-    const patch = applyStaleSnapshot(stateWithLocalRow())
+    const state = stateWithLocalRow()
 
-    expect(syncedPage(patch)?.loading).toBe(false)
+    expect(syncedPage(applyStaleSnapshot(state), state)?.loading).toBe(false)
   })
 
   it('keeps local canGoBack instead of the host default', () => {
-    const patch = applyStaleSnapshot(stateWithLocalRow())
+    const state = stateWithLocalRow()
 
-    expect(syncedPage(patch)?.canGoBack).toBe(true)
+    expect(syncedPage(applyStaleSnapshot(state), state)?.canGoBack).toBe(true)
   })
 
   it('keeps local canGoForward instead of the host default', () => {
-    const patch = applyStaleSnapshot(stateWithLocalRow())
+    const state = stateWithLocalRow()
 
-    expect(syncedPage(patch)?.canGoForward).toBe(true)
+    expect(syncedPage(applyStaleSnapshot(state), state)?.canGoForward).toBe(true)
   })
 
   // Why a real title is covered separately: a host that has learned the title publishes a
   // non-fallback string, which the staged-title hold would have accepted. Ownership, not staleness.
   it('keeps the local title even when the host publishes a real but older title', () => {
+    const state = stateWithLocalRow()
     const patch = applyStaleSnapshot(
-      stateWithLocalRow(),
+      state,
       staleHostSnapshot({ title: 'Google Maps — Directions', url: GUEST_URL })
     )
 
-    expect(syncedPage(patch)?.title).toBe(GUEST_TITLE)
+    expect(syncedPage(patch, state)?.title).toBe(GUEST_TITLE)
   })
 
   it('takes host content for a client-placed page this client holds no row for', () => {
-    const patch = applyStaleSnapshot(makeState())
-    const page = patch.browserPagesByWorkspace?.[REMOTE_PAGE]?.[0]
+    const state = makeState()
+    const patch = applyStaleSnapshot(state)
 
-    expect(page).toMatchObject({
+    expect(syncedPage(patch, state, REMOTE_PAGE)).toMatchObject({
       title: HOST_FALLBACK_TITLE,
       url: HOST_STALE_URL,
       loading: true,
@@ -221,12 +237,13 @@ describe('client-placed browser rows own their page content', () => {
   })
 
   it('takes host content for a streamed page even when a local row exists', () => {
+    const state = stateWithLocalRow()
     const patch = applyStaleSnapshot(
-      stateWithLocalRow(),
+      state,
       staleHostSnapshot({ placement: undefined, title: 'Example Domain' })
     )
 
-    expect(syncedPage(patch)).toMatchObject({
+    expect(syncedPage(patch, state)).toMatchObject({
       title: 'Example Domain',
       url: HOST_STALE_URL,
       loading: true,
@@ -235,13 +252,22 @@ describe('client-placed browser rows own their page content', () => {
     })
   })
 
+  // Why this and not just the value: a repeated stale snapshot that rebuilds an equal page still
+  // remounts the pane if it lands in the store, so ownership has to make the patch a no-op.
+  it('leaves the page list untouched when a stale host snapshot repeats', () => {
+    const patch = applyStaleSnapshot(stateWithLocalRow())
+
+    expect(patch.browserPagesByWorkspace?.[LOCAL_WORKSPACE]).toBeUndefined()
+  })
+
   // The staged-title hold still owns the pre-adoption window and every non-client placement.
   it('still holds the local title for a streamed page parked at the same url', () => {
+    const state = stateWithLocalRow()
     const patch = applyStaleSnapshot(
-      stateWithLocalRow(),
+      state,
       staleHostSnapshot({ placement: undefined, title: HOST_FALLBACK_TITLE, url: GUEST_URL })
     )
 
-    expect(syncedPage(patch)?.title).toBe(GUEST_TITLE)
+    expect(syncedPage(patch, state)?.title).toBe(GUEST_TITLE)
   })
 })
