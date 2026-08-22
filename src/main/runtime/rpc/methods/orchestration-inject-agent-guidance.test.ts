@@ -1,36 +1,31 @@
 import { describe, expect, it } from 'vitest'
 import { buildInjectAgentGuidance } from './orchestration-inject-agent-guidance'
-import { OrcaRuntimeService } from '../../orca-runtime'
+import { TUI_AGENT_CONFIG } from '../../../../shared/tui-agent-config'
+import { recognizeAgentProcess } from '../../../../shared/agent-process-recognition'
 
 describe('buildInjectAgentGuidance', () => {
-  it('names the roster it was given, deduped and sorted', () => {
-    const message = buildInjectAgentGuidance('term_a', ['codex', 'agy', 'claude', 'claude'])
+  const message = buildInjectAgentGuidance('term_a')
 
+  it('keeps the substring callers and scripts match on', () => {
     expect(message).toContain('Cannot dispatch --inject to terminal term_a')
     expect(message).toContain('no recognized agent detected')
-    expect(message).toContain('(agy, claude, codex)')
   })
 
-  it('falls back to examples when the roster is unavailable', () => {
-    expect(buildInjectAgentGuidance('term_a', [])).toContain('(agy, claude, codex)')
-  })
-})
-
-describe('OrcaRuntimeService.listEnabledAgentProcessNames', () => {
-  it('includes antigravity when nothing is disabled', () => {
-    const names = new OrcaRuntimeService().listEnabledAgentProcessNames()
-
-    expect(names).toContain('agy')
-    expect(names).toContain('claude')
+  it('names every agent Orca recognizes, including agy', () => {
+    expect(message).toMatch(/\bagy\b/)
+    for (const config of Object.values(TUI_AGENT_CONFIG)) {
+      expect(message).toContain(config.expectedProcess)
+    }
   })
 
-  it('omits agents the user disabled', () => {
-    const runtime = new OrcaRuntimeService({
-      getSettings: () => ({ disabledTuiAgents: ['antigravity'] })
-    } as never)
+  it('lists only names detection actually resolves, deduped and sorted', () => {
+    const listed = (/\(([^)]+)\)/.exec(message)?.[1] ?? '').split(', ')
 
-    const names = runtime.listEnabledAgentProcessNames()
-    expect(names).not.toContain('agy')
-    expect(names).toContain('claude')
+    expect(listed.length).toBeGreaterThan(0)
+    expect(new Set(listed).size).toBe(listed.length)
+    expect([...listed].sort()).toEqual(listed)
+    for (const name of listed) {
+      expect(recognizeAgentProcess(name)).not.toBeNull()
+    }
   })
 })

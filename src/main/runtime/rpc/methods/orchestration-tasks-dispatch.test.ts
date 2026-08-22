@@ -3,6 +3,7 @@ import type { RpcContext } from '../core'
 import { createOrchestrationRpcHarness } from './orchestration-rpc-test-harness'
 import type { OrchestrationDb } from '../../orchestration/db'
 import type { OrcaRuntimeService } from '../../orca-runtime'
+import { TUI_AGENT_CONFIG } from '../../../../shared/tui-agent-config'
 
 describe('orchestration RPC methods', () => {
   const h = createOrchestrationRpcHarness()
@@ -399,29 +400,18 @@ describe('orchestration RPC methods', () => {
       ).rejects.toThrow('no recognized agent detected')
     })
 
-    it('names enabled agents from the canonical roster in the inject rejection', async () => {
+    it('names every recognized agent in the inject rejection', async () => {
       setup()
       const task = db.createTask({ spec: 'work' })
       vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(false)
 
       const message = await rejectionMessage(task.id)
 
+      // Why: pins the message to TUI_AGENT_CONFIG; a reintroduced literal list fails this.
       expect(message).toMatch(/\bagy\b/)
-      expect(message).toMatch(/\bclaude\b/)
-    })
-
-    it('omits disabled agents from the inject rejection', async () => {
-      setup()
-      const task = db.createTask({ spec: 'work' })
-      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(false)
-      // Why: pins the message to the runtime roster; a reintroduced literal list fails this.
-      vi.spyOn(runtime, 'listEnabledAgentProcessNames').mockReturnValue(['claude', 'codex'])
-
-      const message = await rejectionMessage(task.id)
-
-      expect(message).toContain('no recognized agent detected')
-      expect(message).toContain('(claude, codex)')
-      expect(message).not.toMatch(/\bagy\b/)
+      for (const config of Object.values(TUI_AGENT_CONFIG)) {
+        expect(message).toContain(config.expectedProcess)
+      }
     })
 
     it('rejects dispatch to occupied terminal', async () => {

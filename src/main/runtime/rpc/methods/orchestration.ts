@@ -1644,7 +1644,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       if (params.inject) {
         const hasAgent = await runtime.isTerminalRunningAgent(to)
         if (!hasAgent) {
-          throw new Error(buildInjectAgentGuidance(to, runtime.listEnabledAgentProcessNames()))
+          throw new Error(buildInjectAgentGuidance(to))
         }
       }
 
