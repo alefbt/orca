@@ -14,8 +14,6 @@ import {
   resetGrabModeState
 } from './browser-grab-ipc'
 import { registerBrowserSessionProfileHandlers } from './browser-session-profile-ipc'
-import { BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL } from '../../shared/browser-client-page-renderer-protocol'
-import { getBrowserClientHostId } from '../browser/paired-runtime-browser-client-host-runtime'
 import type { BrowserCertificateProceedResult } from '../../shared/browser-workspace-types'
 import {
   cancelBrowserWebAuthnAccountRequests,
@@ -46,11 +44,6 @@ export function registerBrowserHandlers(): void {
   ipcMain.removeHandler('browser:activeTabChanged')
   ipcMain.removeHandler('browser:proceedCertificate')
   ipcMain.removeHandler('browser:respondWebAuthnAccount')
-  ipcMain.removeAllListeners(BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL)
-
-  ipcMain.on(BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL, (event) => {
-    event.returnValue = isTrustedBrowserRenderer(event.sender) ? getBrowserClientHostId() : null
-  })
 
   const registerGuest = (
     event: Electron.IpcMainInvokeEvent,

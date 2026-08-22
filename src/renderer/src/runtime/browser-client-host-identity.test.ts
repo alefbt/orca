@@ -16,9 +16,9 @@ describe('readBrowserClientHostId', () => {
     expect(readBrowserClientHostId()).toBe('browser-host-a')
   })
 
-  // Why the read is not repeated: it is a blocking round trip to main, and the id it returns is
-  // fixed for the life of the process.
-  it('asks main once and answers from the cache after that', () => {
+  // Why the read is not repeated: every row of every session snapshot asks, and the id is fixed
+  // for the life of the process.
+  it('asks the bridge once and answers from the cache after that', () => {
     const readClientHostId = vi.fn(() => 'browser-host-a')
     vi.stubGlobal('api', { browser: { readClientHostId } })
 
@@ -32,7 +32,7 @@ describe('readBrowserClientHostId', () => {
   it.each([
     ['a client whose api cannot answer', { browser: {} }],
     ['a client with no api at all', undefined],
-    ['a main process that declines the read', { browser: { readClientHostId: () => null } }]
+    ['a renderer main stamped no id into', { browser: { readClientHostId: () => null } }]
   ])('reports no host id for %s', (_label, api) => {
     vi.stubGlobal('api', api)
 
@@ -41,7 +41,7 @@ describe('readBrowserClientHostId', () => {
 
   // Why null is not cached: it means the answer was unavailable, not that this client will never
   // host — a caller that asked too early must not be told "never" for the rest of the session.
-  it('keeps asking until main answers', () => {
+  it('keeps asking until the bridge answers', () => {
     const readClientHostId = vi
       .fn<() => string | null>()
       .mockImplementationOnce(() => {

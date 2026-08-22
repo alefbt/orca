@@ -11,7 +11,8 @@ let cachedBrowserClientHostId: string | null = null
  * other client's, and everything that page publishes is all we will ever know about it.
  *
  * Only a real id is cached: a null means the answer was not available yet rather than that this
- * client will never host, and on the web it costs one property read to say so again.
+ * client will never host, and on the web it costs one property read to say so again. The read
+ * itself is a scan of the renderer's own argv, so it cannot block and cannot fail late.
  */
 export function readBrowserClientHostId(): string | null {
   if (cachedBrowserClientHostId !== null) {

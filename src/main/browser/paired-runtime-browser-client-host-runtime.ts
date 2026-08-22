@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { app } from 'electron'
 import { BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY } from '../../shared/browser-client-automation-protocol'
@@ -14,6 +14,7 @@ import {
   browserAuthorityExecutionHostStorageIdentity,
   legacyBrowserNativeExecutionHostStorageIdentity
 } from './browser-execution-host-storage-identity'
+import { getBrowserClientHostId } from './browser-client-host-id'
 import { deriveBrowserRoutePartitionStorageScope } from './browser-route-identity'
 import { BrowserClientDownloadRelay } from './browser-client-download-relay'
 import { registerBrowserClientDownloadRouter } from './browser-client-download-routing'
@@ -56,16 +57,6 @@ type ProductionBrowserClientHostStart = PairedRuntimeBrowserClientHostStart & {
   legacyAuthorityConnectionIdentity: string
   storageScope: string
   environmentLabel: string
-}
-
-const browserHostClientId = randomUUID()
-
-/**
- * The id every lease this app takes out is minted under, and therefore the id a page's placement
- * carries when the guest runs in this app's own renderer rather than another client's.
- */
-export function getBrowserClientHostId(): string {
-  return browserHostClientId
 }
 
 let activeOrcaProfileId: string | null = null
@@ -124,7 +115,7 @@ const browserClientHosts =
           const host = new PairedRuntimeBrowserClientHost({
             pairing: next.pairing,
             authorityRuntimeId: next.authorityRuntimeId,
-            browserHostClientId,
+            browserHostClientId: getBrowserClientHostId(),
             hostCapabilities: [
               'webview',
               BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY,

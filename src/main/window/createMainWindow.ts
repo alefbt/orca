@@ -15,6 +15,8 @@ import type { Store } from '../persistence'
 import { getAppIconPath } from '../app-icon'
 import { browserManager } from '../browser/browser-manager'
 import { browserSessionRegistry } from '../browser/browser-session-registry'
+import { getBrowserClientHostId } from '../browser/browser-client-host-id'
+import { formatBrowserClientHostIdArgument } from '../../shared/browser-client-host-id-argument'
 import {
   enforceLocalSshWebRtcPolicyForGuest,
   isLocalSshBrowserPartition
@@ -316,7 +318,11 @@ export function createMainWindow(
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
-      webviewTag: true
+      webviewTag: true,
+      // Why an argument and not an IPC read: this is the window whose webviews host browser guests,
+      // and it has to know that before it interprets its first session snapshot — earlier than any
+      // handler registration it could wait on.
+      additionalArguments: [formatBrowserClientHostIdArgument(getBrowserClientHostId())]
     }
   })
   const rendererWebContents = mainWindow.webContents
@@ -509,6 +515,8 @@ export function createMainWindow(
     webPreferences.preload = browserWindowClosePreload
     // Why: older Electron builds expose preloadURL alongside preload; delete both so the guest can't inherit the main preload bridge.
     delete (webPreferences as Record<string, unknown>).preloadURL
+    // Why: the embedder's argv carries this app's browser-host id; a guest has no use for it.
+    delete webPreferences.additionalArguments
     webPreferences.nodeIntegration = false
     webPreferences.nodeIntegrationInSubFrames = false
     webPreferences.enableBlinkFeatures = ''

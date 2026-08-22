@@ -8,11 +8,6 @@ const WebContentsId = z.number().int().positive()
 export const BROWSER_CLIENT_PAGE_RENDERER_REQUEST_CHANNEL =
   'browser:clientPageRendererRequest' as const
 export const BROWSER_CLIENT_PAGE_RENDERER_REPLY_CHANNEL = 'browser:clientPageRendererReply' as const
-/**
- * Synchronous because the renderer needs its host identity before it interprets the first session
- * snapshot: resolving it a round trip later would let one snapshot be read as another client's.
- */
-export const BROWSER_CLIENT_HOST_ID_SYNC_CHANNEL = 'browser:clientHostIdSync' as const
 
 export const BrowserClientPageRendererIdentity = z.object({
   partition: Partition,
