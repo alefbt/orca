@@ -33494,8 +33494,9 @@ export class OrcaRuntimeService {
     }
   })
 
+  /** Serves a hydrating host renderer; the publisher counts this as a delivery, not a read. */
   listClientHostedBrowserRows(): ClientHostedBrowserRowsEvent[] {
-    return this.clientHostedBrowserRows.snapshot()
+    return this.clientHostedBrowserRows.deliverHydrationSnapshot()
   }
 
   private notifyMobileSessionTabsRemoved(worktreeId: string): void {

@@ -186,7 +186,7 @@ describe('ClientHostedBrowserRowPublisher', () => {
     publisher.publish('wt-1')
 
     expect(events).toEqual([])
-    expect(publisher.snapshot()).toEqual([])
+    expect(publisher.deliverHydrationSnapshot()).toEqual([])
   })
 
   it('snapshots every workspace with client pages for renderer hydration', () => {
@@ -197,7 +197,7 @@ describe('ClientHostedBrowserRowPublisher', () => {
 
     expect(
       publisher
-        .snapshot()
+        .deliverHydrationSnapshot()
         .map((event) => event.worktreeId)
         .sort()
     ).toEqual(['wt-1', 'wt-2'])
@@ -206,6 +206,47 @@ describe('ClientHostedBrowserRowPublisher', () => {
   it('snapshots nothing when no client page exists', () => {
     const { publisher } = createPublisher()
 
-    expect(publisher.snapshot()).toEqual([])
+    expect(publisher.deliverHydrationSnapshot()).toEqual([])
+  })
+
+  // Why: hydration is a delivery, not a peek. A row the renderer only ever learned about this way
+  // is one the retraction path must still be able to take back — otherwise it sits in the host
+  // strip for the runtime's life, and its page is already gone so no second close can clear it.
+  it('retracts a row the renderer received only through hydration', () => {
+    const { publisher, registry, events, livePlacements, attach, detach } = createPublisher()
+    detach()
+    publishPage(registry, 'page-1', 'wt-1')
+    livePlacements.add('page-1')
+    publisher.publish('wt-1')
+
+    attach()
+    expect(publisher.deliverHydrationSnapshot()).toEqual([
+      { worktreeId: 'wt-1', rows: [expect.objectContaining({ browserPageId: 'page-1' })] }
+    ])
+    events.length = 0
+
+    registry.retirePage('page-1', registry.getPage('page-1')!.placement)
+    publisher.publish('wt-1')
+
+    expect(events).toEqual([{ worktreeId: 'wt-1', rows: [] }])
+  })
+
+  // Why the snapshot replaces rather than adds to the delivered set: the renderer clears before
+  // applying it, so a workspace absent from the snapshot is one the renderer no longer holds.
+  it('stops tracking a workspace the hydration snapshot no longer carries', () => {
+    const { publisher, registry, events, livePlacements, attach, detach } = createPublisher()
+    publishPage(registry, 'page-1', 'wt-1')
+    livePlacements.add('page-1')
+    publisher.publish('wt-1')
+
+    detach()
+    registry.retirePage('page-1', registry.getPage('page-1')!.placement)
+    attach()
+    expect(publisher.deliverHydrationSnapshot()).toEqual([])
+    events.length = 0
+
+    publisher.publish('wt-1')
+
+    expect(events).toEqual([])
   })
 })

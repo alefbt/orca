@@ -50,7 +50,13 @@ export class ClientHostedBrowserRowPublisher {
     }
   }
 
-  snapshot(): ClientHostedBrowserRowsEvent[] {
+  /**
+   * Answers a renderer hydrating its rows, and records the answer as delivered. This is the other
+   * half of `publish`, not a read-only peek: a window that came up in a no-notifier gap learns
+   * about its rows only here, and an unrecorded delivery is unretractable — the emptied publish
+   * that should take the row back is the very one the never-published suppression swallows.
+   */
+  deliverHydrationSnapshot(): ClientHostedBrowserRowsEvent[] {
     const pagesByWorktreeId = new Map<string, RuntimeBrowserClientPage[]>()
     for (const page of this.host.listClientPages()) {
       const pages = pagesByWorktreeId.get(page.workspaceId)
@@ -59,6 +65,13 @@ export class ClientHostedBrowserRowPublisher {
       } else {
         pagesByWorktreeId.set(page.workspaceId, [page])
       }
+    }
+    // Replaced, not added to: the renderer clears before applying, so this set is its whole
+    // contents afterwards. Re-deriving it every hydration is also what heals a stale entry left
+    // by a window that went away between a publish and its retraction.
+    this.publishedWorktreeIds.clear()
+    for (const worktreeId of pagesByWorktreeId.keys()) {
+      this.publishedWorktreeIds.add(worktreeId)
     }
     return [...pagesByWorktreeId].map(([worktreeId, pages]) => ({
       worktreeId,

@@ -237,6 +237,35 @@ describe('client-hosted browser row push', () => {
     expect(events).toEqual([])
     expect(runtime.listClientHostedBrowserRows()[0]?.rows).toHaveLength(1)
   })
+
+  /**
+   * The whole no-window round trip macOS makes ordinary: closing the last window clears the
+   * notifier but leaves the runtime serving the paired client, so a page opened in that gap only
+   * ever reaches the next window through hydration. Closing that row is the one exit it has.
+   */
+  it('closes a row the host window only ever learned about by hydrating', () => {
+    const { runtime, events } = createRuntime()
+    runtime.setNotifier(null)
+    attachHost(runtime, 'host-a')
+    const placement = placeAndPublish(runtime, 'page-a', 'host-a')
+    runtime.notifyMobileSessionTabsChanged(WT)
+    expect(events).toEqual([])
+
+    runtime.setNotifier({
+      clientHostedBrowserRowsChanged: (event: ClientHostedBrowserRowsEvent) => events.push(event)
+    } as never)
+    expect(runtime.listClientHostedBrowserRows()).toEqual([
+      { worktreeId: WT, rows: [expect.objectContaining({ browserPageId: 'page-a' })] }
+    ])
+    events.length = 0
+
+    // browserTabClose retires the registry page before it announces, so the announcement already
+    // sees an empty workspace — exactly the shape the never-published suppression swallows.
+    expect(getRuntimeBrowserPageRegistry(runtime).retirePage('page-a', placement)).toBe(true)
+    runtime.retireRuntimeOwnedBrowserSessionTab(WT, 'page-a')
+
+    expect(events).toEqual([{ worktreeId: WT, rows: [] }])
+  })
 })
 
 // Why: the metadata publish is the only thing that makes the row's title real, and it reaches the
