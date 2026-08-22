@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import type * as ReactModule from 'react'
 import type { HarnessStoreState } from './ipc-events-harness-store-state'
+import type { ClientHostedBrowserRowsEvent } from '../../../shared/client-hosted-browser-rows'
 
 // Re-exported so a suite needs one import for the harness and the store surface it seeds.
 export {
@@ -51,6 +52,10 @@ export type IpcEventsHarness = {
   jumpToTabIndex: (index: number) => void
   navigationUpdate: (event: { browserPageId: string; url: string; title: string }) => void
   certificateFailureChanged: (event: { browserPageId: string; failure: unknown }) => void
+  /** Fire a host-local push of the pages a paired client renders for a worktree. */
+  clientHostedBrowserRowsChanged: (event: ClientHostedBrowserRowsEvent) => void
+  /** Resolves the hydration round trip the hook starts, so buffered pushes drain. */
+  settleClientHostedBrowserRowsSnapshot: () => Promise<void>
   /** Standard (non-palette) target of a workspace digit chord. */
   activateAndRevealWorkspace: ReturnType<typeof vi.fn>
 }
@@ -59,6 +64,8 @@ export type IpcEventsHarnessOptions = {
   /** Sidebar order the workspace digit chord indexes into. */
   visibleWorktreeIds?: string[]
   visibleWorktreeTargets?: { id: string; executionHostId?: 'local' | `ssh:${string}` }[]
+  /** Snapshot the client-hosted row hydration round trip resolves with. */
+  clientHostedBrowserRowsSnapshot?: ClientHostedBrowserRowsEvent[]
 }
 
 /**
@@ -79,6 +86,11 @@ export async function loadIpcEventsHarness(
   let certificateFailureListener:
     | ((event: { browserPageId: string; failure: unknown }) => void)
     | null = null
+  let clientHostedBrowserRowsListener: ((event: ClientHostedBrowserRowsEvent) => void) | null = null
+  let resolveClientHostedBrowserRowsSnapshot: (() => void) | null = null
+  const clientHostedBrowserRowsSnapshotGate = new Promise<void>((resolve) => {
+    resolveClientHostedBrowserRowsSnapshot = resolve
+  })
   const indexJumpListeners = new Map<string, (index: number) => void>()
 
   vi.resetModules()
@@ -161,8 +173,16 @@ export async function loadIpcEventsHarness(
           onTerminalFitOverrideChanged: () => () => {},
           onTerminalDriverChanged: () => () => {},
           onBrowserDriverChanged: () => () => {},
-          onClientHostedBrowserRowsChanged: () => () => {},
-          getClientHostedBrowserRows: async () => []
+          onClientHostedBrowserRowsChanged: (
+            listener: (event: ClientHostedBrowserRowsEvent) => void
+          ) => {
+            clientHostedBrowserRowsListener = listener
+            return () => {}
+          },
+          getClientHostedBrowserRows: async () => {
+            await clientHostedBrowserRowsSnapshotGate
+            return options.clientHostedBrowserRowsSnapshot ?? []
+          }
         },
         ssh: {
           listTargets: () => Promise.resolve([]),
@@ -233,6 +253,18 @@ export async function loadIpcEventsHarness(
         throw new Error('Expected the browser certificate-failure listener to be registered')
       }
       certificateFailureListener(event)
+    },
+    clientHostedBrowserRowsChanged: (event) => {
+      if (typeof clientHostedBrowserRowsListener !== 'function') {
+        throw new Error('Expected the client-hosted browser rows listener to be registered')
+      }
+      clientHostedBrowserRowsListener(event)
+    },
+    settleClientHostedBrowserRowsSnapshot: async () => {
+      resolveClientHostedBrowserRowsSnapshot?.()
+      await clientHostedBrowserRowsSnapshotGate
+      await Promise.resolve()
+      await Promise.resolve()
     },
     activateAndRevealWorkspace
   }

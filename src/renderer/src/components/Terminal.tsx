@@ -54,6 +54,7 @@ import {
   onBrowserDriverChange,
   useBrowserMobileDriverForAny
 } from '@/lib/pane-manager/browser-mobile-driver-state'
+import { useClientHostedBrowserRows } from '@/lib/pane-manager/client-hosted-browser-row-state'
 import {
   useAnyBrowserGuestNeedsPaint,
   useWorktreeBrowserPageIds
@@ -445,6 +446,9 @@ function Terminal(): React.JSX.Element | null {
   const worktreeBrowserTabs = renderedActiveWorktreeId
     ? (browserTabsByWorktree[renderedActiveWorktreeId] ?? [])
     : []
+  // Why: this strip only renders before the worktree has a layout, which is exactly when a paired
+  // client can have opened a page the host never has. Without a row here it stays uncloseable.
+  const worktreeClientHostedBrowserRows = useClientHostedBrowserRows(renderedActiveWorktreeId ?? '')
   const getEffectiveLayoutForWorktree = useCallback(
     (worktreeId: string) =>
       getEffectiveLayout(worktreeId, layoutByWorktree, groupsByWorktree, activeGroupIdByWorktree),
@@ -2499,6 +2503,7 @@ function Terminal(): React.JSX.Element | null {
             onTogglePaneExpand={handleTogglePaneExpand}
             editorFiles={worktreeFiles}
             browserTabs={worktreeBrowserTabs}
+            clientHostedBrowserRows={worktreeClientHostedBrowserRows}
             activeFileId={activeFileId}
             activeBrowserTabId={activeBrowserTabId}
             activeSimulatorTabId={
