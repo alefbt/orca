@@ -12,6 +12,14 @@ import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } fro
 
 type Fixture = { close(): Promise<void>; first: string; second: string }
 
+type MetadataPublishFaultWindow = Window & {
+  __browserClientPageMetadataPublishFault?: {
+    suppress: () => void
+    resume: () => void
+    snapshot: () => { suppressed: boolean }
+  }
+}
+
 async function startFixture(): Promise<Fixture> {
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1')
@@ -203,6 +211,19 @@ async function run(args: {
     // Drive the guest somewhere the host was never told about, then sample every title the store
     // publishes while the tab is toggled and the worktree is switched away and back.
     await waitForClientGuest(page, fixture.first, 'client-hosted guest never attached')
+
+    // Why the publish is held back, and only now that the guest owns the pane: a client-hosted page
+    // reports its navigations to the runtime, so the runtime normally catches up within a
+    // round-trip and the two never disagree long enough to sample. The carve-out under test covers
+    // that window and a publish that never lands at all; suppressing one holds the window open.
+    // Asserted rather than fired blind — an absent fault would leave the premise silently false.
+    expect(
+      await page.evaluate(() => {
+        const fault = (window as MetadataPublishFaultWindow).__browserClientPageMetadataPublishFault
+        fault?.suppress()
+        return fault?.snapshot() ?? null
+      })
+    ).toEqual({ suppressed: true })
     await page.evaluate(
       async ({ prefix, url }) => {
         for (const candidate of document.querySelectorAll('webview')) {

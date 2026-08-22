@@ -1,4 +1,5 @@
 import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
+import { e2eSuppressesBrowserClientPageMetadataPublish } from './browser-client-page-metadata-publish-e2e-fault'
 import {
   createBrowserClientPageMetadataPublisher,
   type BrowserClientPageMetadataUnpublished
@@ -47,10 +48,12 @@ export function startBrowserClientPageMetadataPublisher(options: {
     placement: options.placement,
     nextRevision: options.nextRevision,
     publish: (params) =>
-      window.api.browser.publishClientPageMetadata({
-        environmentId: options.environmentId,
-        params
-      }),
+      e2eSuppressesBrowserClientPageMetadataPublish()
+        ? Promise.resolve({ status: 'refused' as const })
+        : window.api.browser.publishClientPageMetadata({
+            environmentId: options.environmentId,
+            params
+          }),
     onUnpublished: (detail) =>
       reportUnpublishedBrowserClientPageMetadata(options.browserPageId, detail)
   })
