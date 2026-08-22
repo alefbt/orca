@@ -33,6 +33,7 @@ import {
 import type { RecentlyClosedTabPosition } from './recently-closed-tabs'
 import { callRuntimeRpc, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
+import { ensureBrowserClientHostsForRestoredPages } from '@/runtime/restored-client-hosted-browser-host-attach'
 import type {
   BrowserDetectProfilesResult,
   BrowserProfileClearDefaultCookiesResult,
@@ -132,6 +133,37 @@ export type RemoteBrowserPageHandle = {
    * the first frame instead of swapping components at adoption.
    */
   stagedClientHosted?: true
+  /**
+   * Rebuilt at hydration from the persisted page row rather than observed from a host snapshot. The
+   * page id is real, but nothing has confirmed the host still has it, so the row is exempt from the
+   * absent-from-snapshot cull until the first snapshot that publishes it clears this.
+   */
+  restoredFromSession?: true
+  /** The restored page was hosted by this desktop, so it must not restore as a streamed pane. */
+  restoredClientHosted?: true
+}
+
+/** Rebuild the remote page handles a restored session implies. No placement is seeded: the
+ *  persisted generations belong to the host lease that died with the last run, and the first host
+ *  snapshot is what supplies the live one. */
+function buildRestoredRemoteBrowserPageHandles(
+  browserPagesByWorkspace: Record<string, BrowserPage[]>
+): Record<string, RemoteBrowserPageHandle> {
+  const handles: Record<string, RemoteBrowserPageHandle> = {}
+  for (const pages of Object.values(browserPagesByWorkspace)) {
+    for (const page of pages) {
+      if (!page.browserRuntimeEnvironmentId || !page.remoteBrowserPageId) {
+        continue
+      }
+      handles[page.id] = {
+        environmentId: page.browserRuntimeEnvironmentId,
+        remotePageId: page.remoteBrowserPageId,
+        restoredFromSession: true,
+        ...(page.remoteBrowserPageClientHosted ? { restoredClientHosted: true as const } : {})
+      }
+    }
+  }
+  return handles
 }
 
 export type BrowserCookieImportExecutionResult = BrowserCookieImportResult & {
@@ -1893,7 +1925,8 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         activeBrowserTabId,
         activeTabTypeByWorktree: nextActiveTabTypeByWorktree,
         activeTabType,
-        remoteBrowserPageHandlesByPageId: {},
+        remoteBrowserPageHandlesByPageId:
+          buildRestoredRemoteBrowserPageHandles(browserPagesByWorkspace),
         browserCertificateFailuresByPageId: {},
         browserAnnotationsByPageId: {},
         browserUrlHistory: normalizeBrowserHistoryEntries(session.browserUrlHistory ?? [])
@@ -1901,6 +1934,9 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
     })
 
     const state = get()
+    // Why here and not in the startup chain: the seeded handles are the only record that this
+    // desktop was hosting pages, and the runtime only hands them back once it sees an attach.
+    void ensureBrowserClientHostsForRestoredPages(state)
     for (const [worktreeId, browserTabs] of Object.entries(state.browserTabsByWorktree)) {
       for (const bt of browserTabs) {
         const exists = (state.unifiedTabsByWorktree[worktreeId] ?? []).some(

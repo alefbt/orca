@@ -282,7 +282,8 @@ export function buildWorkspaceSessionPayload(
     ...buildBrowserSessionData(
       snapshot.browserTabsByWorktree,
       snapshot.browserPagesByWorkspace,
-      snapshot.activeBrowserTabIdByWorktree
+      snapshot.activeBrowserTabIdByWorktree,
+      snapshot.remoteBrowserPageHandlesByPageId
     ),
     // Why: enforce the history storage cap here so stale renderer state can't make every write stringify an oversized legacy array.
     browserUrlHistory: normalizeBrowserHistoryEntries(snapshot.browserUrlHistory),

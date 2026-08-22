@@ -2724,12 +2724,16 @@ function applyWebSessionTabsSnapshotWithContext(
         if (!browserWorkspaceHasRemoteEnvironmentPage(state, tab, environmentId)) {
           return false
         }
-        // Why: a staged tab holds a handle before its create RPC answers, so its absence from
-        // this snapshot is expected — culling it would erase the optimistic tab mid-create.
+        // Why: a staged tab holds a handle before its create RPC answers, and a restored tab holds
+        // one rebuilt from disk before the relaunched host has republished the page. Neither
+        // handle is evidence the host ever saw this snapshot's worktree, so absence proves
+        // nothing — culling here would erase an optimistic tab mid-create or a restored tab a
+        // recovering host is still about to hand back.
         if (
-          (state.browserPagesByWorkspace[tab.id] ?? []).some(
-            (page) => state.remoteBrowserPageHandlesByPageId[page.id]?.staged === true
-          )
+          (state.browserPagesByWorkspace[tab.id] ?? []).some((page) => {
+            const handle = state.remoteBrowserPageHandlesByPageId[page.id]
+            return handle?.staged === true || handle?.restoredFromSession === true
+          })
         ) {
           return false
         }
@@ -3328,6 +3332,10 @@ function applyWebSessionTabsSnapshotWithContext(
       // Why: this snapshot is the host publishing the page, which is exactly what clears a
       // staged handle — without this the optimistic flag would survive every later snapshot.
       currentHandle.staged === true ||
+      // Why separately: a host that puts a restored page back on the server publishes no
+      // placement, so the handle is otherwise identical to the seed and the restored markers
+      // would never be spent — leaving the row cull-proof and pinned to the client-hosted pane.
+      currentHandle.restoredFromSession === true ||
       !optionalRuntimeBrowserPlacementsEqual(currentHandle.placement, placement)
     ) {
       nextRemoteBrowserPageHandlesByPageId =

@@ -417,4 +417,47 @@ describe('buildWorkspaceSessionPatch', () => {
     expect(patch.activeBrowserTabIdByWorktree).toEqual({ 'wt-1': 'adopted-1' })
     expect(patch.unifiedTabs?.['wt-1']).toHaveLength(1)
   })
+
+  // Why: the incremental writer is the one that runs on quit, so a remote page identity the full
+  // payload stamps but the patch drops never reaches disk in the case this exists for.
+  it('stamps the remote page identity onto incrementally patched browser page rows', () => {
+    const patch = buildWorkspaceSessionPatch(
+      createSnapshot({
+        browserTabsByWorktree: {
+          'wt-1': [
+            {
+              id: 'adopted-1',
+              activePageId: 'adopted-page',
+              pageIds: ['adopted-page'],
+              worktreeId: 'wt-1'
+            } as never
+          ]
+        },
+        browserPagesByWorkspace: {
+          'adopted-1': [
+            { id: 'adopted-page', workspaceId: 'adopted-1', worktreeId: 'wt-1' } as never
+          ]
+        },
+        remoteBrowserPageHandlesByPageId: {
+          'adopted-page': {
+            environmentId: 'env-1',
+            remotePageId: 'host-page-1',
+            placement: {
+              kind: 'client',
+              browserHostClientId: 'host-a',
+              browserHostGeneration: 1,
+              pageHostGeneration: 1
+            }
+          }
+        },
+        activeBrowserTabIdByWorktree: { 'wt-1': 'adopted-1' }
+      }),
+      ['browserPagesByWorkspace']
+    )
+
+    expect(patch.browserPagesByWorkspace?.['adopted-1']?.[0]).toMatchObject({
+      remoteBrowserPageId: 'host-page-1',
+      remoteBrowserPageClientHosted: true
+    })
+  })
 })

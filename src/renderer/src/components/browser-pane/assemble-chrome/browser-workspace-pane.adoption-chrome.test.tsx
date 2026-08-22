@@ -235,6 +235,21 @@ function stageClientHostedHandle(): void {
   })
 }
 
+/** The handle hydration seeds for a client-hosted page restored from a previous run: a real host
+ *  page id, but no placement until the relaunched host recovers the page. */
+function restoreClientHostedHandle(): void {
+  useAppStore.setState({
+    remoteBrowserPageHandlesByPageId: {
+      [PAGE_ID]: {
+        environmentId: ENVIRONMENT_ID,
+        remotePageId: 'remote-page-a',
+        restoredFromSession: true,
+        restoredClientHosted: true
+      }
+    }
+  })
+}
+
 /** The host snapshot arriving: the staged flag drops and the page lands on this desktop. */
 function adoptOntoClient(pageHostGeneration = CLIENT_PLACEMENT.pageHostGeneration): void {
   useAppStore.setState({
@@ -683,6 +698,25 @@ describe.each([
     act(() => flushFrames())
 
     expect(webview.loadURL).toHaveBeenCalledWith('https://example.internal/client-deferred')
+  })
+
+  // Why: a restored client-placed row has no placement until the relaunched host recovers it, and
+  // the streamed pane would open a server screencast the host refuses for a client-placed page.
+  it('mounts a restored client-hosted page on the client pane while the host recovers it', () => {
+    restoreClientHostedHandle()
+    renderWorkspacePane()
+
+    expect(screen.queryByTestId('streamed-viewport')).toBeNull()
+    expect(mocks.ensureRemotePage).not.toHaveBeenCalled()
+    // The recovered page keeps its id but not its generation, so attaching now would strand the
+    // pane on the unavailable notice.
+    expect(mocks.attach).not.toHaveBeenCalled()
+    expect(screen.queryByText('Client-hosted browser unavailable')).toBeNull()
+
+    act(() => adoptOntoClient())
+    act(() => flushFrames())
+
+    expect(mocks.attach).toHaveBeenCalled()
   })
 
   it('replays a URL held against the staged page when a headless host adopts it', async () => {

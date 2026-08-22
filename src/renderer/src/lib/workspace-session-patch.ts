@@ -125,7 +125,8 @@ export function buildWorkspaceSessionPatch(
   }
   if (stagedVisibilityChanged || changed.has('browserPagesByWorkspace')) {
     patch.browserPagesByWorkspace = buildPersistedBrowserPagesByWorkspace(
-      snapshot.browserPagesByWorkspace
+      snapshot.browserPagesByWorkspace,
+      snapshot.remoteBrowserPageHandlesByPageId
     )
   }
   if (stagedVisibilityChanged || changed.has('activeBrowserTabIdByWorktree')) {

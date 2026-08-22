@@ -327,6 +327,72 @@ describe('buildWorkspaceSessionPayload', () => {
     expect(payload.activeBrowserTabIdByWorktree?.['wt-1']).toBeNull()
   })
 
+  // Why: the handle map is in-memory only. Without stamping the remote page identity onto the row
+  // that reaches disk, a relaunch has nothing to rebuild the handle from and the restored tab
+  // silently downgrades to a fresh server page.
+  it('stamps the remote page identity of a client-hosted browser page onto its persisted row', () => {
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        remoteBrowserPageHandlesByPageId: {
+          'page-1': {
+            environmentId: 'env-1',
+            remotePageId: 'remote-page-1',
+            placement: {
+              kind: 'client',
+              browserHostClientId: 'host-a',
+              browserHostGeneration: 2,
+              pageHostGeneration: 4
+            }
+          }
+        }
+      })
+    )
+
+    expect(payload.browserPagesByWorkspace?.['browser-1']?.[0]).toMatchObject({
+      remoteBrowserPageId: 'remote-page-1',
+      remoteBrowserPageClientHosted: true
+    })
+  })
+
+  it('marks a server-hosted remote page row with its remote page id but not client hosting', () => {
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        remoteBrowserPageHandlesByPageId: {
+          'page-1': { environmentId: 'env-1', remotePageId: 'remote-page-1' }
+        }
+      })
+    )
+
+    expect(payload.browserPagesByWorkspace?.['browser-1']?.[0]).toMatchObject({
+      remoteBrowserPageId: 'remote-page-1'
+    })
+    expect(
+      payload.browserPagesByWorkspace?.['browser-1']?.[0].remoteBrowserPageClientHosted
+    ).toBeUndefined()
+  })
+
+  // Why: a row restored from a previous quit has no placement until the host republishes it, so
+  // reading client hosting off the placement alone would lose the marker on a second quit.
+  it('keeps the client-hosted marker on a restored row the host has not republished yet', () => {
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        remoteBrowserPageHandlesByPageId: {
+          'page-1': {
+            environmentId: 'env-1',
+            remotePageId: 'remote-page-1',
+            restoredFromSession: true,
+            restoredClientHosted: true
+          }
+        }
+      })
+    )
+
+    expect(payload.browserPagesByWorkspace?.['browser-1']?.[0]).toMatchObject({
+      remoteBrowserPageId: 'remote-page-1',
+      remoteBrowserPageClientHosted: true
+    })
+  })
+
   it('drops local terminal scrollback buffers from session payloads', () => {
     const localWorktreeId = 'repo-1::/local/worktree'
     const payload = buildWorkspaceSessionPayload(
