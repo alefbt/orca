@@ -11,7 +11,12 @@ const { handleMock, removeHandlerMock, createProfileMock, routeIdentityMock, det
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromWebContents: vi.fn() },
-  ipcMain: { handle: handleMock, removeHandler: removeHandlerMock },
+  ipcMain: {
+    handle: handleMock,
+    removeHandler: removeHandlerMock,
+    on: vi.fn(),
+    removeAllListeners: vi.fn()
+  },
   webContents: { fromId: vi.fn() }
 }))
 
