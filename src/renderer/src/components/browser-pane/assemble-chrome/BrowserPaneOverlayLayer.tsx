@@ -248,7 +248,11 @@ function ClientHostedBrowserRowOverlaySlot({
     return null
   }
   return (
-    <div style={style} className="flex min-h-0 flex-col">
+    <div
+      style={style}
+      className="flex min-h-0 flex-col"
+      data-client-hosted-browser-host-row-pane={selectedRow.browserPageId}
+    >
       <ClientHostedBrowserHostRowPane row={selectedRow} />
     </div>
   )

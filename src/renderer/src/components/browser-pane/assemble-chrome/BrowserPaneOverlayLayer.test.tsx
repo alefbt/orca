@@ -58,7 +58,23 @@ vi.mock('./browser-workspace-pane', () => ({
   )
 }))
 
+import {
+  applyClientHostedBrowserRows,
+  clearClientHostedBrowserRowSelection,
+  selectClientHostedBrowserRow
+} from '@/lib/pane-manager/client-hosted-browser-row-state'
 import BrowserPaneOverlayLayer, { RetainedBrowserPaneOverlayLayer } from './BrowserPaneOverlayLayer'
+
+const HOST_ROW = {
+  browserPageId: 'page-hosted',
+  worktreeId: 'wt-1',
+  url: 'https://example.test/hosted',
+  title: 'Hosted',
+  loading: false,
+  browserHostClientId: 'host-a',
+  hostDeviceName: 'Studio',
+  hostAbsent: false
+}
 
 describe('BrowserPaneOverlayLayer', () => {
   beforeEach(() => {
@@ -68,7 +84,13 @@ describe('BrowserPaneOverlayLayer', () => {
     mocks.state = createState()
   })
 
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    // The row store is module-level, so a leftover row would render an extra pane in every
+    // sibling test.
+    clearClientHostedBrowserRowSelection()
+    applyClientHostedBrowserRows({ worktreeId: 'wt-1', rows: [] })
+  })
 
   it('defers browser slots for a restricted hidden mount, then retains them after activation', () => {
     const view = render(
@@ -274,6 +296,33 @@ describe('BrowserPaneOverlayLayer', () => {
     expect(markup).not.toContain('data-browser-pane-id="browser-a"')
     expect(markup).toContain('data-browser-pane-id="browser-b"')
     expect(markup).toContain('data-browser-pane-active="false"')
+  })
+
+  // Why DOM order and not just presence: the host-row pane carries no guest and paints over
+  // whichever webview the group was showing. Both siblings are absolutely positioned onto the same
+  // anchor, so the only thing putting it on top is being last — a reorder is invisible to every
+  // other assertion here and would bury it under a guest.
+  it('renders the client-hosted host-row pane after every browser slot', () => {
+    applyClientHostedBrowserRows({ worktreeId: 'wt-1', rows: [HOST_ROW] })
+    selectClientHostedBrowserRow({
+      worktreeId: 'wt-1',
+      browserPageId: HOST_ROW.browserPageId,
+      groupId: 'group-1',
+      groupActiveTabIdAtSelection: 'tab-a'
+    })
+
+    const view = render(<BrowserPaneOverlayLayer worktreeId="wt-1" isWorktreeActive />)
+
+    const ordered = [
+      ...view.container.querySelectorAll(
+        '[data-browser-overlay-tab-id],[data-client-hosted-browser-host-row-pane]'
+      )
+    ].map(
+      (node) =>
+        node.getAttribute('data-browser-overlay-tab-id') ??
+        `host-row:${node.getAttribute('data-client-hosted-browser-host-row-pane')}`
+    )
+    expect(ordered).toEqual(['browser-a', 'browser-b', 'host-row:page-hosted'])
   })
 })
 
