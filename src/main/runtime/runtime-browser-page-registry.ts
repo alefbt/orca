@@ -152,7 +152,14 @@ export class RuntimeBrowserPageRegistry {
     placement: RuntimeBrowserClientPlacement
   ): RuntimeBrowserClientPage {
     const current = this.requireExactPage(browserPageId, expected)
-    const next = freezePage({ ...current, placement: Object.freeze({ ...placement }) })
+    // Why the revision restarts: it is the replacing host's own counter, and a host that just took
+    // this placement over counts from zero. Keeping the old high-water mark deafens the page to
+    // that host until it catches up.
+    const next = freezePage({
+      ...current,
+      metadataRevision: 0,
+      placement: Object.freeze({ ...placement })
+    })
     this.pages.set(browserPageId, next)
     return next
   }
