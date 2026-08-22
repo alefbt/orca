@@ -158,12 +158,30 @@ capability-gated, with the carve-out narrowed to clients that did not negotiate 
 capability. Note the cross-version harness does not exercise the session-tab sync channel, so
 nothing fails if this is forgotten — this note is the only record.
 
-The same carve-out now covers `title`, `url`, `loading`, `canGoBack` and `canGoForward`
+A related carve-out covers `title`, `url`, `loading`, `canGoBack` and `canGoForward`
 (`resolveMirroredBrowserPageContent`), and for those the hazard is already live rather than
-forward-facing: the host does publish them, from a `RuntimeBrowserClientPage` it can only
-learn about second-hand through the client's own `browser.clientHost.pageMetadata` calls. Its
-copy therefore starts at the registry defaults (`'Browser'`, the create-time url) and is never
-fresher than the client's guest. A client that holds a local row ignores all five; one that
-does not — a fresh mirror on a second client — still takes them, which is the only reason a
-mirrored viewer shows anything at all. Improving what a *second* client sees means fixing the
-publish, not the carve-out.
+forward-facing: the host does publish them, from a `RuntimeBrowserClientPage` it can only learn
+about second-hand through the client's own `browser.clientHost.pageMetadata` calls. Its copy
+therefore starts at the registry defaults (`'Browser'`, the create-time url), and while those
+publishes are failing it never leaves them.
+
+That copy is not simply behind, though, and a client must not treat it as such. When a lease
+reattaches, the host refreshes the page from the client host's own inventory
+(`runtime-browser-client-page-recovery.ts`), which reads the live guest — so it can be strictly
+fresher than a local row whose pane is unmounted and whose metadata publisher was disposed with
+it. A client that ignores the host url is relying on its own guest to re-answer on remount,
+which `ClientHostedBrowserPagePane`'s mount-time `syncNavigation` is what makes true.
+
+These five are therefore refused only by the client whose guest actually runs the page:
+`placement.browserHostClientId` is compared against this client's own host id
+(`readBrowserClientHostId`, from `getBrowserClientHostId` in main). Every other viewer — a second
+desktop, the web client, which installs no page renderer at all — keeps tracking the host, which
+is the only reason a mirrored viewer shows anything but its first snapshot forever. Improving what
+a *second* client sees still means fixing the publish, not the carve-out; the carve-out no longer
+stands in the way of it.
+
+The two failure fields above are deliberately left on the looser `placement?.kind !== 'client'`
+predicate. It is unobservable today — the host publishes neither field for a client-placed page at
+all, so a mirror has nothing to take either way. If the capability-gated publish this section
+anticipates ever lands, narrow them the same way rather than by placement kind: a mirror should
+take a failure it cannot otherwise see, and only the hosting client should refuse it.
