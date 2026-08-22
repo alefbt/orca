@@ -157,3 +157,13 @@ they silently drop, so the host would see no error and no effect. Publishing it 
 capability-gated, with the carve-out narrowed to clients that did not negotiate the
 capability. Note the cross-version harness does not exercise the session-tab sync channel, so
 nothing fails if this is forgotten — this note is the only record.
+
+The same carve-out now covers `title`, `url`, `loading`, `canGoBack` and `canGoForward`
+(`resolveMirroredBrowserPageContent`), and for those the hazard is already live rather than
+forward-facing: the host does publish them, from a `RuntimeBrowserClientPage` it can only
+learn about second-hand through the client's own `browser.clientHost.pageMetadata` calls. Its
+copy therefore starts at the registry defaults (`'Browser'`, the create-time url) and is never
+fresher than the client's guest. A client that holds a local row ignores all five; one that
+does not — a fresh mirror on a second client — still takes them, which is the only reason a
+mirrored viewer shows anything at all. Improving what a *second* client sees means fixing the
+publish, not the carve-out.
