@@ -203,6 +203,31 @@ describe('ClientHostedBrowserRowPublisher', () => {
     ).toEqual(['wt-1', 'wt-2'])
   })
 
+  // Why the retraction and not just the snapshot's shape: recording only the first workspace the
+  // snapshot carries returns the same events as recording all of them, and only diverges when the
+  // second workspace's row has to come back off the strip. That divergence is the ghost row this
+  // round exists to kill, returning for anyone holding client pages in two worktrees at once.
+  it('records every workspace the hydration snapshot carries, not just the first', () => {
+    const { publisher, registry, events, livePlacements } = createPublisher()
+    publishPage(registry, 'page-1', 'wt-1')
+    publishPage(registry, 'page-2', 'wt-2')
+    livePlacements.add('page-1')
+    livePlacements.add('page-2')
+
+    expect(publisher.deliverHydrationSnapshot()).toHaveLength(2)
+    events.length = 0
+
+    registry.retirePage('page-1', registry.getPage('page-1')!.placement)
+    registry.retirePage('page-2', registry.getPage('page-2')!.placement)
+    publisher.publish('wt-1')
+    publisher.publish('wt-2')
+
+    expect(events).toEqual([
+      { worktreeId: 'wt-1', rows: [] },
+      { worktreeId: 'wt-2', rows: [] }
+    ])
+  })
+
   it('snapshots nothing when no client page exists', () => {
     const { publisher } = createPublisher()
 
