@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type * as AgentStatusModule from '@/lib/agent-status'
 import type { BrowserPage } from '../../../../shared/browser-workspace-types'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
-import { RemoteBrowserPageSession } from '@/components/browser-pane/stream-remote/remote-browser-page-session'
+import {
+  RemoteBrowserPageSession,
+  type RemoteBrowserPageSessionDeps
+} from '@/components/browser-pane/stream-remote/remote-browser-page-session'
+import { RuntimeRpcCallError } from '@/runtime/runtime-rpc-result'
 import { resetRestoredBrowserClientHostAttachForTests } from '@/runtime/restored-client-hosted-browser-host-attach'
 import { createTestStore, makeWorktree, makeTab } from './store-test-helpers'
 import { createStoreSessionMockApi, makeBrowserTab } from './store-session-test-harness'
@@ -440,18 +444,17 @@ describe('hydrateBrowserSession remote page handle seeding', () => {
     expect(store.getState().remoteBrowserPageHandlesByPageId['page-1']?.placement).toBeUndefined()
   })
 
-  it('seeds a handle without the client-hosted marker for a restored server-hosted page', () => {
+  // Why nothing is seeded here: a server-hosted page lives on the runtime, and a runtime that
+  // restarted while this desktop was closed no longer has it. A seeded handle sends the pane down
+  // the adopt branch, which answers browser_tab_not_found by deleting the row.
+  it('seeds no handle for a restored server-hosted page', () => {
     const store = createHydratedStore({
       id: 'page-1',
       browserRuntimeEnvironmentId: 'env-1',
       remoteBrowserPageId: 'remote-page-1'
     })
 
-    expect(store.getState().remoteBrowserPageHandlesByPageId['page-1']).toEqual({
-      environmentId: 'env-1',
-      remotePageId: 'remote-page-1',
-      restoredFromSession: true
-    })
+    expect(store.getState().remoteBrowserPageHandlesByPageId).toEqual({})
   })
 
   it('seeds nothing for a page persisted without a remote page id', () => {
@@ -466,19 +469,18 @@ describe('hydrateBrowserSession remote page handle seeding', () => {
     expect(store.getState().remoteBrowserPageHandlesByPageId).toEqual({})
   })
 
-  // Why this drives the real session object: the seed only pays off if the pane's own handle read
-  // finds it. Asserting the store map alone passes even if nothing downstream consumes it.
-  it('adopts the restored remote page instead of creating a new one', async () => {
-    const store = createHydratedStore({
-      id: 'page-1',
-      browserRuntimeEnvironmentId: 'env-1',
-      remoteBrowserPageId: 'remote-page-1'
-    })
-    const callRpc = vi.fn(async (_target: unknown, _method: string) => ({
-      tab: { url: 'https://example.com/', title: 'Example' }
-    }))
+  // Why this drives the real session object: what a seeded handle does to a pane is decided inside
+  // ensureRemotePage. Asserting the store map alone says nothing about which branch it picks.
+  function createStreamedSession(
+    store: ReturnType<typeof createTestStore>,
+    deps: {
+      callRpc: RemoteBrowserPageSessionDeps['callRpc']
+      currentUrl: string
+      closeMissingRemotePage?: (remotePageId: string | null) => void
+    }
+  ): RemoteBrowserPageSession {
     let remotePage: string | null = null
-    const session = new RemoteBrowserPageSession({
+    return new RemoteBrowserPageSession({
       tokens: {
         isCurrent: () => true,
         get remotePage() {
@@ -488,14 +490,28 @@ describe('hydrateBrowserSession remote page handle seeding', () => {
           remotePage = value
         }
       } as never,
-      callRpc: callRpc as never,
+      callRpc: deps.callRpc,
       getWorktreeSelector: () => WT,
-      getCurrentUrl: () => 'https://example.com/',
+      getCurrentUrl: () => deps.currentUrl,
       readStoredHandle: () => store.getState().remoteBrowserPageHandlesByPageId['page-1'] ?? null,
       writeStoredHandle: (handle) => store.getState().setRemoteBrowserPageHandle('page-1', handle),
-      removeStoredHandle: () => {},
+      removeStoredHandle: (remotePageId) =>
+        store.getState().removeRemoteBrowserPageHandle('page-1', remotePageId),
       applyTabInfo: () => {},
-      closeMissingRemotePage: () => {}
+      closeMissingRemotePage: deps.closeMissingRemotePage ?? (() => {})
+    })
+  }
+
+  it('adopts a remote page this session already created', async () => {
+    const store = createHydratedStore({ id: 'page-1', browserRuntimeEnvironmentId: 'env-1' })
+    store.getState().setRemoteBrowserPageHandle('page-1', {
+      environmentId: 'env-1',
+      remotePageId: 'remote-page-1'
+    })
+    const callRpc = vi.fn(async () => ({ tab: { url: 'https://example.com/', title: 'Example' } }))
+    const session = createStreamedSession(store, {
+      callRpc: callRpc as never,
+      currentUrl: 'https://example.com/'
     })
 
     const resolved = await session.ensureRemotePage({
@@ -506,5 +522,43 @@ describe('hydrateBrowserSession remote page handle seeding', () => {
 
     expect(resolved).toBe('remote-page-1')
     expect(callRpc.mock.calls.map(([, method]) => method)).toEqual(['browser.tabShow'])
+  })
+
+  // Why the runtime is made to answer browser_tab_not_found: that is what a runtime restarted while
+  // the desktop was closed says, and the adopt branch answers it by closing the row. Re-creating is
+  // what the user sees as their tab coming back at the URL they left it on.
+  it('re-creates a restored server-hosted page at its saved URL instead of adopting it', async () => {
+    const store = createHydratedStore({
+      id: 'page-1',
+      browserRuntimeEnvironmentId: 'env-1',
+      remoteBrowserPageId: 'remote-page-1',
+      url: 'https://example.com/saved'
+    })
+    const callRpc = vi.fn(async (_target: unknown, method: string) => {
+      if (method === 'browser.tabShow') {
+        throw new RuntimeRpcCallError({
+          ok: false,
+          error: { code: 'browser_tab_not_found', message: 'browser_tab_not_found' }
+        } as never)
+      }
+      return { browserPageId: 'remote-page-2' }
+    })
+    const closeMissingRemotePage = vi.fn()
+    const session = createStreamedSession(store, {
+      callRpc: callRpc as never,
+      currentUrl: 'https://example.com/saved',
+      closeMissingRemotePage
+    })
+
+    const resolved = await session.ensureRemotePage({
+      environmentId: 'env-1',
+      generation: 1,
+      remotePageId: null
+    } as never)
+
+    expect(closeMissingRemotePage).not.toHaveBeenCalled()
+    expect(callRpc.mock.calls.map(([, method]) => method)).toEqual(['browser.tabCreate'])
+    expect(callRpc.mock.calls[0]?.[2]).toMatchObject({ url: 'https://example.com/saved' })
+    expect(resolved).toBe('remote-page-2')
   })
 })

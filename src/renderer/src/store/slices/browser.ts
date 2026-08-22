@@ -145,21 +145,30 @@ export type RemoteBrowserPageHandle = {
 
 /** Rebuild the remote page handles a restored session implies. No placement is seeded: the
  *  persisted generations belong to the host lease that died with the last run, and the first host
- *  snapshot is what supplies the live one. */
+ *  snapshot is what supplies the live one.
+ *
+ *  Client-hosted rows only. A server-hosted page lives on the runtime, which may have restarted or
+ *  been redeployed while this desktop was closed; a seeded handle sends its pane down the adopt
+ *  branch, and the browser_tab_not_found that comes back deletes the row. With no handle the pane
+ *  creates a fresh page at the URL the row persisted, which is what the user left behind. */
 function buildRestoredRemoteBrowserPageHandles(
   browserPagesByWorkspace: Record<string, BrowserPage[]>
 ): Record<string, RemoteBrowserPageHandle> {
   const handles: Record<string, RemoteBrowserPageHandle> = {}
   for (const pages of Object.values(browserPagesByWorkspace)) {
     for (const page of pages) {
-      if (!page.browserRuntimeEnvironmentId || !page.remoteBrowserPageId) {
+      if (
+        !page.browserRuntimeEnvironmentId ||
+        !page.remoteBrowserPageId ||
+        !page.remoteBrowserPageClientHosted
+      ) {
         continue
       }
       handles[page.id] = {
         environmentId: page.browserRuntimeEnvironmentId,
         remotePageId: page.remoteBrowserPageId,
         restoredFromSession: true,
-        ...(page.remoteBrowserPageClientHosted ? { restoredClientHosted: true as const } : {})
+        restoredClientHosted: true
       }
     }
   }
