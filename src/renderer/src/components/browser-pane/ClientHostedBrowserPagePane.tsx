@@ -7,7 +7,7 @@ import type {
 } from '../../../../shared/browser-workspace-types'
 import { redactKagiSessionToken, toHttpsRecoveryUrl } from '../../../../shared/browser-url'
 import type { RuntimeBrowserClientPlacement } from '../../../../shared/runtime-browser-placement'
-import type { BrowserClientPageMetadataSnapshot } from './browser-client-page-metadata-publisher'
+import { readBrowserClientPageGuestMetadata } from './browser-client-page-guest-metadata'
 import {
   forgetBrowserClientPageMetadataReports,
   startBrowserClientPageMetadataPublisher
@@ -241,11 +241,11 @@ export function ClientHostedBrowserPagePane({
     // navigation that fails outright often never commits and leaves the guest on the old URL.
     activeLoadFailureRef.current = resolveActiveBrowserLoadFailure(
       activeLoadFailureRef.current,
-      readClientPageMetadata(webview).url
+      readBrowserClientPageGuestMetadata(webview).url
     )
     const syncNavigation = (event?: Event): void => {
       const eventUrl = (event as (Event & { url?: string }) | undefined)?.url
-      const metadata = readClientPageMetadata(webview, eventUrl)
+      const metadata = readBrowserClientPageGuestMetadata(webview, eventUrl)
       // Why: did-stop-loading fires after did-fail-load, so an unconditional null here would
       // wipe the failure the overlay is about to show.
       const activeLoadFailure = activeLoadFailureRef.current
@@ -273,7 +273,7 @@ export function ClientHostedBrowserPagePane({
     const onStart = (): void => {
       activeLoadFailureRef.current = null
       updatePageStateFromGuest(browserTab.id, { loading: true, loadError: null })
-      publisher.publish(readClientPageMetadata(webview, undefined, true))
+      publisher.publish(readBrowserClientPageGuestMetadata(webview, undefined, true))
     }
     const onFailLoad = (event: Event): void => {
       const loadError = resolveBrowserWebviewLoadFailure(event as BrowserPageFailLoadEvent, {
@@ -435,19 +435,4 @@ export function ClientHostedBrowserPagePane({
       </div>
     </div>
   )
-}
-
-function readClientPageMetadata(
-  webview: Electron.WebviewTag,
-  eventUrl?: string,
-  loading?: boolean
-): BrowserClientPageMetadataSnapshot {
-  const url = redactKagiSessionToken(eventUrl || webview.getURL() || 'about:blank')
-  return {
-    url,
-    title: webview.getTitle() || url || 'Browser',
-    loading: loading ?? webview.isLoading(),
-    canGoBack: webview.canGoBack(),
-    canGoForward: webview.canGoForward()
-  }
 }
