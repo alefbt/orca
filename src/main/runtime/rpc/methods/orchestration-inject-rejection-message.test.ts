@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildInjectAgentGuidance } from './orchestration-inject-agent-guidance'
+import { buildInjectRejectionMessage } from './orchestration-inject-rejection-message'
 import { TUI_AGENT_CONFIG } from '../../../../shared/tui-agent-config'
 import { recognizeAgentProcess } from '../../../../shared/agent-process-recognition'
 
-describe('buildInjectAgentGuidance', () => {
-  const message = buildInjectAgentGuidance('term_a')
+describe('buildInjectRejectionMessage', () => {
+  const message = buildInjectRejectionMessage('term_a')
 
   it('keeps the substring callers and scripts match on', () => {
     expect(message).toContain('Cannot dispatch --inject to terminal term_a')

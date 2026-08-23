@@ -27,7 +27,7 @@ import {
   resolveBareOrchestrationRecipient,
   type SendRecipientWarning
 } from './orchestration-recipient-routing'
-import { buildInjectAgentGuidance } from './orchestration-inject-agent-guidance'
+import { buildInjectRejectionMessage } from './orchestration-inject-rejection-message'
 import { resolveRunScope } from './orchestration-run-scope'
 import { ORCHESTRATION_RUN_METHODS } from './orchestration-runs'
 import { ORCHESTRATION_WORKER_METHODS } from './orchestration-worker-methods'
@@ -1644,7 +1644,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
       if (params.inject) {
         const hasAgent = await runtime.isTerminalRunningAgent(to)
         if (!hasAgent) {
-          throw new Error(buildInjectAgentGuidance(to))
+          throw new Error(buildInjectRejectionMessage(to))
         }
       }
 

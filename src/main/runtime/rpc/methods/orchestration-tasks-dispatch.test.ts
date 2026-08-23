@@ -3,7 +3,7 @@ import type { RpcContext } from '../core'
 import { createOrchestrationRpcHarness } from './orchestration-rpc-test-harness'
 import type { OrchestrationDb } from '../../orchestration/db'
 import type { OrcaRuntimeService } from '../../orca-runtime'
-import { TUI_AGENT_CONFIG } from '../../../../shared/tui-agent-config'
+import { buildInjectRejectionMessage } from './orchestration-inject-rejection-message'
 
 describe('orchestration RPC methods', () => {
   const h = createOrchestrationRpcHarness()
@@ -195,13 +195,6 @@ describe('orchestration RPC methods', () => {
   })
 
   describe('orchestration.dispatch', () => {
-    async function rejectionMessage(taskId: string): Promise<string> {
-      return call('orchestration.dispatch', { task: taskId, to: 'term_a', inject: true }).then(
-        () => '',
-        (error: unknown) => (error as Error).message
-      )
-    }
-
     function provideInjectIdentity(handle = 'term_a'): void {
       vi.mocked(runtime.getTerminalPaneKey).mockImplementation((candidate) =>
         candidate === handle ? `tab_worker:${handle}` : coordinatorPaneKey
@@ -397,21 +390,7 @@ describe('orchestration RPC methods', () => {
           to: 'term_a',
           inject: true
         })
-      ).rejects.toThrow('no recognized agent detected')
-    })
-
-    it('names every recognized agent in the inject rejection', async () => {
-      setup()
-      const task = db.createTask({ spec: 'work' })
-      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(false)
-
-      const message = await rejectionMessage(task.id)
-
-      // Why: pins the message to TUI_AGENT_CONFIG; a reintroduced literal list fails this.
-      expect(message).toMatch(/\bagy\b/)
-      for (const config of Object.values(TUI_AGENT_CONFIG)) {
-        expect(message).toContain(config.expectedProcess)
-      }
+      ).rejects.toThrow(buildInjectRejectionMessage('term_a'))
     })
 
     it('rejects dispatch to occupied terminal', async () => {

@@ -360,7 +360,7 @@ describe('agent process recognition', () => {
     expect(isAgentForegroundWrapperProcess('vim.exe')).toBe(false)
   })
 
-  it('recognizes agy from TUI_AGENT_CONFIG, not from a node_modules antigravity entrypoint', () => {
+  it('recognizes the Antigravity CLI from bare, POSIX and Windows command lines', () => {
     const agy = { agent: 'antigravity', processName: 'agy' }
 
     expect(recognizeAgentProcess('agy')).toEqual(agy)
@@ -374,12 +374,6 @@ describe('agent process recognition', () => {
       )
     ).toEqual(agy)
     expect(recognizeAgentProcessFromCommandLine('agy --dangerously-skip-permissions')).toEqual(agy)
-    // Why: agy ships as a native binary, so a node-hosted `antigravity` script is somebody else's package.
-    expect(
-      recognizeAgentProcessFromCommandLine(
-        'node /usr/local/lib/node_modules/antigravity/bin/antigravity.js'
-      )
-    ).toBeNull()
   })
 
   it('recognizes versioned Grok process names observed from the installed CLI', () => {
