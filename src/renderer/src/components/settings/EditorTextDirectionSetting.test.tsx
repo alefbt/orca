@@ -63,10 +63,14 @@ describe('EditorTextDirectionSetting', () => {
     expect(option(container, 'LTR')?.getAttribute('aria-checked')).toBe('true')
   })
 
-  it('reflects the persisted auto and rtl choices', () => {
+  it('reflects the persisted auto choice', () => {
     expect(option(renderSetting('auto').container, 'Auto')?.getAttribute('aria-checked')).toBe(
       'true'
     )
+  })
+
+  it('reflects the persisted rtl choice', () => {
+    expect(option(renderSetting('rtl').container, 'RTL')?.getAttribute('aria-checked')).toBe('true')
   })
 
   it('persists each direction choice', () => {

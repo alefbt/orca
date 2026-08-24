@@ -50,6 +50,18 @@ vi.mock('./EditorPanelMarkdownActionsMenu', () => ({
   EditorPanelMarkdownActionsMenu: () => null
 }))
 
+const directionButton = vi.hoisted(() => ({ onToggle: null as (() => void) | null }))
+vi.mock('./EditorTextDirectionButton', () => ({
+  EditorTextDirectionButton: ({ isRtl, onToggle }: { isRtl: boolean; onToggle: () => void }) => {
+    directionButton.onToggle = onToggle
+    return (
+      <button aria-label="Text Direction" aria-pressed={isRtl}>
+        {isRtl ? 'Left-to-Right' : 'Right-to-Left'}
+      </button>
+    )
+  }
+}))
+
 vi.mock('@/components/artifacts/ArtifactPublishButton', () => ({
   ArtifactPublishButton: () => <button data-artifact-publish />
 }))
@@ -192,23 +204,25 @@ describe('EditorPanelHeader', () => {
       expect(html).toContain('Left-to-Right')
     })
 
-    it('sets an rtl override from an ltr default, then clears it on the way back', () => {
-      const html = renderHeader({
-        activeFile: editFile,
-        isDiffSurface: false,
-        canShowTextDirectionToggle: true
-      })
-      expect(html).toContain('aria-pressed="false"')
-
-      // First press: no override yet, so pin the opposite of the resolved direction.
-      storeStub.setEditorTextDirectionOverride.mockClear()
+    it('pins rtl from an ltr default, then clears the override on the way back', () => {
       renderHeader({
         activeFile: editFile,
         isDiffSurface: false,
         canShowTextDirectionToggle: true
       })
-      // The rendered markup cannot dispatch clicks, so assert the resolution the handler uses.
-      expect(storeStub.editorTextDirectionByFile[editFile.id]).toBeUndefined()
+      directionButton.onToggle?.()
+      expect(storeStub.setEditorTextDirectionOverride).toHaveBeenCalledWith(editFile.id, 'rtl')
+
+      storeStub.setEditorTextDirectionOverride.mockClear()
+      storeStub.editorTextDirectionByFile = { [editFile.id]: 'rtl' }
+      renderHeader({
+        activeFile: editFile,
+        isDiffSurface: false,
+        canShowTextDirectionToggle: true
+      })
+      directionButton.onToggle?.()
+      // Why: clearing (not pinning 'ltr') is what lets the file follow Settings again.
+      expect(storeStub.setEditorTextDirectionOverride).toHaveBeenCalledWith(editFile.id, null)
     })
 
     it('resolves back to an auto default rather than pinning ltr, once an override is cleared', () => {
@@ -221,9 +235,25 @@ describe('EditorPanelHeader', () => {
         canShowTextDirectionToggle: true
       })
 
-      // 'auto' is neither pressed nor labelled RTL; it must remain reachable.
+      // 'auto' is neither pressed nor labelled RTL.
       expect(html).toContain('aria-pressed="false"')
       expect(html).toContain('Right-to-Left')
+
+      storeStub.setEditorTextDirectionOverride.mockClear()
+      directionButton.onToggle?.()
+      expect(storeStub.setEditorTextDirectionOverride).toHaveBeenCalledWith(editFile.id, 'rtl')
+
+      // Why: from an 'auto' default the override must clear, not pin 'ltr', or the file
+      // could never return to auto (#16291 review).
+      storeStub.setEditorTextDirectionOverride.mockClear()
+      storeStub.editorTextDirectionByFile = { [editFile.id]: 'rtl' }
+      renderHeader({
+        activeFile: editFile,
+        isDiffSurface: false,
+        canShowTextDirectionToggle: true
+      })
+      directionButton.onToggle?.()
+      expect(storeStub.setEditorTextDirectionOverride).toHaveBeenCalledWith(editFile.id, null)
     })
 
     it('stays hidden on diff surfaces, where Monaco keeps LTR-only layout math', () => {

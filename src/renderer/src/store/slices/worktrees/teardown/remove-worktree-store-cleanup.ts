@@ -127,6 +127,7 @@ export function applyRemoveWorktreeSuccessState(
         delete nextMarkdownViewMode[fileId]
         delete nextEditorViewMode[fileId]
         delete nextMarkdownFrontmatterVisible[fileId]
+        delete nextEditorTextDirectionByFile[fileId]
         delete nextEditorCursorLine[fileId]
       }
     }
