@@ -116,6 +116,8 @@ export function applyRemoveWorktreeSuccessState(
     const nextEditorViewMode = removedFileIds.size > 0 ? { ...s.editorViewMode } : s.editorViewMode
     const nextMarkdownFrontmatterVisible =
       removedFileIds.size > 0 ? { ...s.markdownFrontmatterVisible } : s.markdownFrontmatterVisible
+    const nextEditorTextDirectionByFile =
+      removedFileIds.size > 0 ? { ...s.editorTextDirectionByFile } : s.editorTextDirectionByFile
     // Why: editorCursorLine is keyed by fileId; clear it with the other per-file state so it doesn't leak.
     const nextEditorCursorLine =
       removedFileIds.size > 0 ? { ...s.editorCursorLine } : s.editorCursorLine
@@ -235,6 +237,7 @@ export function applyRemoveWorktreeSuccessState(
       markdownViewMode: nextMarkdownViewMode,
       editorViewMode: nextEditorViewMode,
       markdownFrontmatterVisible: nextMarkdownFrontmatterVisible,
+      editorTextDirectionByFile: nextEditorTextDirectionByFile,
       editorCursorLine: nextEditorCursorLine,
       showDotfilesByWorktree: nextShowDotfilesByWorktree,
       expandedDirs: nextExpandedDirs,
