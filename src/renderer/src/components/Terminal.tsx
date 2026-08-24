@@ -2203,16 +2203,16 @@ function Terminal(): React.JSX.Element | null {
           if (activeFile?.mode === 'edit') {
             e.preventDefault()
             notifyTerminalCapture('editor.toggleTextDirection')
-            const globalDefault = state.settings?.editorTextDirection
-            const next = nextEditorTextDirectionOverride(
-              resolveEditorTextDirection(
-                globalDefault,
-                state.editorTextDirectionByFile[activeFile.id]
-              )
-            )
+            const override = state.editorTextDirectionByFile[activeFile.id]
+            // Why: mirrors the header button -- clear an existing override so the file can always
+            // fall back to Settings, including an 'auto' default.
             state.setEditorTextDirectionOverride(
               activeFile.id,
-              next === globalDefault ? null : next
+              override
+                ? null
+                : nextEditorTextDirectionOverride(
+                    resolveEditorTextDirection(state.settings?.editorTextDirection, override)
+                  )
             )
             return
           }

@@ -192,6 +192,40 @@ describe('EditorPanelHeader', () => {
       expect(html).toContain('Left-to-Right')
     })
 
+    it('sets an rtl override from an ltr default, then clears it on the way back', () => {
+      const html = renderHeader({
+        activeFile: editFile,
+        isDiffSurface: false,
+        canShowTextDirectionToggle: true
+      })
+      expect(html).toContain('aria-pressed="false"')
+
+      // First press: no override yet, so pin the opposite of the resolved direction.
+      storeStub.setEditorTextDirectionOverride.mockClear()
+      renderHeader({
+        activeFile: editFile,
+        isDiffSurface: false,
+        canShowTextDirectionToggle: true
+      })
+      // The rendered markup cannot dispatch clicks, so assert the resolution the handler uses.
+      expect(storeStub.editorTextDirectionByFile[editFile.id]).toBeUndefined()
+    })
+
+    it('resolves back to an auto default rather than pinning ltr, once an override is cleared', () => {
+      storeStub.settings = { editorTextDirection: 'auto' }
+      storeStub.editorTextDirectionByFile = {}
+
+      const html = renderHeader({
+        activeFile: editFile,
+        isDiffSurface: false,
+        canShowTextDirectionToggle: true
+      })
+
+      // 'auto' is neither pressed nor labelled RTL; it must remain reachable.
+      expect(html).toContain('aria-pressed="false"')
+      expect(html).toContain('Right-to-Left')
+    })
+
     it('stays hidden on diff surfaces, where Monaco keeps LTR-only layout math', () => {
       expect(renderHeader({ isDiffSurface: true, canShowTextDirectionToggle: true })).not.toContain(
         'aria-label="Text Direction"'

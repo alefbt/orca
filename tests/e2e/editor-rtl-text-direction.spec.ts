@@ -9,8 +9,11 @@ import {
 import { waitForSessionReady } from './helpers/store'
 
 const HEBREW_FILE = 'rtl-notes.txt'
-// Hebrew prose plus an LTR code token, so 'auto' has something to disagree with 'rtl' about.
-const HEBREW_CONTENT = 'שלום עולם, זה קובץ בעברית.\nconst answer = 42\nמרחבא بالعالم\n'
+// Line 1 mixes an RTL run with a trailing LTR run: the two swap visual order when the
+// paragraph's base direction flips, which is the only thing that actually proves bidi
+// reordering happened rather than mere re-alignment.
+const BIDI_LINE = 'שלום עולם ABC'
+const HEBREW_CONTENT = `${BIDI_LINE}\nconst answer = 42\nמרחבא بالعالم\n`
 
 test('reveals and applies the RTL text-direction toggle for a Hebrew file', async ({
   orcaPage,
@@ -52,6 +55,24 @@ test('reveals and applies the RTL text-direction toggle for a Hebrew file', asyn
   await expect(monaco).toBeVisible({ timeout: 25_000 })
   await expect(orcaPage.locator('.view-line').first()).toContainText('שלום', { timeout: 20_000 })
 
+  // Measure where line 1's text sits inside the lines container. Alignment is the effect this
+  // feature actually produces, so assert that rather than the CSS class alone.
+  const lineTextAlignment = async (): Promise<'left' | 'right'> =>
+    orcaPage.evaluate(() => {
+      const container = document.querySelector('.view-lines')
+      const view = document.querySelector('.view-line')
+      if (!container || !view) {
+        throw new Error('no rendered lines')
+      }
+      const range = document.createRange()
+      range.selectNodeContents(view)
+      const text = range.getBoundingClientRect()
+      const box = container.getBoundingClientRect()
+      return text.left - box.left <= box.right - text.right ? 'left' : 'right'
+    })
+
+  expect(await lineTextAlignment()).toBe('left')
+
   // The toggle only appears because the file holds strong RTL text.
   const directionButton = orcaPage.getByRole('button', { name: 'Text Direction' })
   await expect(directionButton).toBeVisible({ timeout: 20_000 })
@@ -73,6 +94,9 @@ test('reveals and applies the RTL text-direction toggle for a Hebrew file', asyn
     )
   ).toBe('rtl')
 
+  // The visible effect of 'rtl': the document's lines become flush right.
+  expect(await lineTextAlignment()).toBe('right')
+
   const rtlShot = testInfo.outputPath('editor-direction-rtl.png')
   await monaco.screenshot({ path: rtlShot })
   await testInfo.attach('editor-direction-rtl', { path: rtlShot, contentType: 'image/png' })
@@ -91,4 +115,24 @@ test('reveals and applies the RTL text-direction toggle for a Hebrew file', asyn
       fileId
     )
   ).toBeNull()
+
+  // With no per-file override left, the global 'auto' default takes over and
+  // each line picks its own base direction from its first strong character.
+  await orcaPage.evaluate(async () => {
+    await window.__store?.getState().updateSettings({ editorTextDirection: 'auto' })
+  })
+  await expect(orcaPage.locator('.editor-dir-auto')).toHaveCount(1)
+  await expect(orcaPage.locator('.editor-dir-rtl')).toHaveCount(0)
+  // 'auto' sets each line's base direction from its first strong character without right-aligning,
+  // so alignment stays left while the class is applied.
+  expect(await lineTextAlignment()).toBe('left')
+
+  const autoShot = testInfo.outputPath('editor-direction-auto.png')
+  await monaco.screenshot({ path: autoShot })
+  await testInfo.attach('editor-direction-auto', { path: autoShot, contentType: 'image/png' })
+
+  await orcaPage.evaluate(async () => {
+    await window.__store?.getState().updateSettings({ editorTextDirection: 'ltr' })
+  })
+  await expect(orcaPage.locator('.editor-dir-auto')).toHaveCount(0)
 })

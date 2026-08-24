@@ -115,9 +115,12 @@ export function EditorPanelHeader({
   // Why: Monaco's diff sub-editors keep their own LTR layout math, so direction stays a plain-editor affordance.
   const canToggleTextDirection = !isDiffSurface && activeFile.mode === 'edit'
   const toggleTextDirection = (): void => {
-    const next = nextEditorTextDirectionOverride(resolvedTextDirection)
-    // Why: drop the override when it matches the global default, so the file follows Settings again.
-    setEditorTextDirectionOverride(activeFile.id, next === editorTextDirection ? null : next)
+    // Why: clearing an existing override is what makes the toggle reversible for every global
+    // default -- pinning the opposite value instead would strand an 'auto' file on ltr/rtl forever.
+    setEditorTextDirectionOverride(
+      activeFile.id,
+      textDirectionOverride ? null : nextEditorTextDirectionOverride(resolvedTextDirection)
+    )
   }
   const fileDiffComments = useMemo(
     () => diffComments.filter((comment) => comment.filePath === activeFile.relativePath),
