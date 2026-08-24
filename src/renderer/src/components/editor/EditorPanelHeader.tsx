@@ -12,6 +12,7 @@ import type { EditorToggleValue } from './EditorViewToggle'
 import type { EditorHeaderOpenFileState } from './editor-header'
 import { DiffNotesSendMenu } from './DiffNotesSendMenu'
 import { EditorPanelMarkdownActionsMenu } from './EditorPanelMarkdownActionsMenu'
+import { EditorTextDirectionButton } from './EditorTextDirectionButton'
 import { translate } from '@/i18n/i18n'
 import { EditorPanelHeaderPath } from './EditorPanelHeaderPath'
 import { useDiffNavigation } from './diff-navigation-context'
@@ -20,6 +21,10 @@ import { ShortcutKeyCombo } from '@/components/ShortcutKeyCombo'
 import type { ArtifactWriteRequest } from '../../../../shared/artifacts'
 import { ArtifactPublishButton } from '@/components/artifacts/ArtifactPublishButton'
 import { markdownArtifactSourceKey } from './markdown-artifact-upload'
+import {
+  nextEditorTextDirectionOverride,
+  resolveEditorTextDirection
+} from '../../../../shared/editor-text-direction'
 
 type EditorPanelHeaderProps = {
   activeFile: OpenFile
@@ -35,6 +40,7 @@ type EditorPanelHeaderProps = {
   canOpenPreviewToSide: boolean
   canShowMarkdownPreview: boolean
   canShowMarkdownTableOfContents: boolean
+  canShowTextDirectionToggle: boolean
   isMarkdownTableOfContentsDisabled: boolean
   shouldShowMarkdownExportAction: boolean
   canExportMarkdownToPdf: boolean
@@ -70,6 +76,7 @@ export function EditorPanelHeader({
   canOpenPreviewToSide,
   canShowMarkdownPreview,
   canShowMarkdownTableOfContents,
+  canShowTextDirectionToggle,
   isMarkdownTableOfContentsDisabled,
   shouldShowMarkdownExportAction,
   canExportMarkdownToPdf,
@@ -97,7 +104,21 @@ export function EditorPanelHeader({
   const diffWordWrap = useAppStore((s) => s.settings?.diffWordWrap === true)
   // Why: undefined/true mean wrap on; only explicit false turns wrap off (#9974).
   const editorWordWrap = useAppStore((s) => s.settings?.editorWordWrap !== false)
+  const editorTextDirection = useAppStore((s) => s.settings?.editorTextDirection)
+  const textDirectionOverride = useAppStore((s) => s.editorTextDirectionByFile[activeFile.id])
+  const setEditorTextDirectionOverride = useAppStore((s) => s.setEditorTextDirectionOverride)
   const updateSettings = useAppStore((s) => s.updateSettings)
+  const resolvedTextDirection = resolveEditorTextDirection(
+    editorTextDirection,
+    textDirectionOverride
+  )
+  // Why: Monaco's diff sub-editors keep their own LTR layout math, so direction stays a plain-editor affordance.
+  const canToggleTextDirection = !isDiffSurface && activeFile.mode === 'edit'
+  const toggleTextDirection = (): void => {
+    const next = nextEditorTextDirectionOverride(resolvedTextDirection)
+    // Why: drop the override when it matches the global default, so the file follows Settings again.
+    setEditorTextDirectionOverride(activeFile.id, next === editorTextDirection ? null : next)
+  }
   const fileDiffComments = useMemo(
     () => diffComments.filter((comment) => comment.filePath === activeFile.relativePath),
     [activeFile.relativePath, diffComments]
@@ -323,11 +344,19 @@ export function EditorPanelHeader({
           createRequest={createMarkdownArtifactRequest}
         />
       ) : null}
+      {canToggleTextDirection && canShowTextDirectionToggle && (
+        <EditorTextDirectionButton
+          isRtl={resolvedTextDirection === 'rtl'}
+          onToggle={toggleTextDirection}
+        />
+      )}
       <EditorPanelMarkdownActionsMenu
         isMarkdown={isMarkdown}
         isDiffSurface={isDiffSurface}
         diffWordWrap={diffWordWrap}
         editorWordWrap={editorWordWrap}
+        textDirectionRtl={resolvedTextDirection === 'rtl'}
+        onToggleTextDirection={canToggleTextDirection ? toggleTextDirection : undefined}
         shouldShowMarkdownExportAction={shouldShowMarkdownExportAction}
         canExportMarkdownToPdf={canExportMarkdownToPdf}
         canShowMarkdownFrontmatterToggle={canShowMarkdownFrontmatterToggle}

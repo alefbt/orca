@@ -11,6 +11,10 @@ import {
 } from '@/constants/terminal'
 import { useAppStore } from '../store'
 import { folderWorkspaceKey } from '../../../shared/workspace-scope'
+import {
+  nextEditorTextDirectionOverride,
+  resolveEditorTextDirection
+} from '../../../shared/editor-text-direction'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { useAllWorktrees } from '../store/selectors'
 import { getConnectionId } from '../lib/connection-context'
@@ -2187,6 +2191,31 @@ function Terminal(): React.JSX.Element | null {
             void state.updateSettings({ editorWordWrap: !wrapOn })
           }
           return
+        }
+      }
+
+      // Why: RTL users need to flip direction without leaving the keyboard; unbound until assigned.
+      if (!e.repeat && matchShortcut('editor.toggleTextDirection')) {
+        const state = useAppStore.getState()
+        if (state.activeTabType === 'editor' && state.activeFileId) {
+          const activeFile = state.openFiles.find((file) => file.id === state.activeFileId)
+          // Why: diff sub-editors keep Monaco's LTR-only layout math, matching the header affordance.
+          if (activeFile?.mode === 'edit') {
+            e.preventDefault()
+            notifyTerminalCapture('editor.toggleTextDirection')
+            const globalDefault = state.settings?.editorTextDirection
+            const next = nextEditorTextDirectionOverride(
+              resolveEditorTextDirection(
+                globalDefault,
+                state.editorTextDirectionByFile[activeFile.id]
+              )
+            )
+            state.setEditorTextDirectionOverride(
+              activeFile.id,
+              next === globalDefault ? null : next
+            )
+            return
+          }
         }
       }
 
