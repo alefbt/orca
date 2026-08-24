@@ -24,6 +24,7 @@ function createSnapshot(
     activeTabIdByWorktree: { 'wt-1': 'tab-1', 'wt-2': 'tab-2' },
     editorDrafts: {},
     markdownFrontmatterVisible: {},
+    editorTextDirectionByFile: {},
     openFiles: [
       {
         id: '/tmp/demo.ts',
@@ -96,6 +97,7 @@ describe('buildWorkspaceSessionPatch', () => {
       [
         'activeFileIdByWorktree',
         'activeTabTypeByWorktree',
+        'editorTextDirectionByFile',
         'markdownFrontmatterVisible',
         'openFilesByWorktree'
       ].sort()
@@ -136,6 +138,7 @@ describe('buildWorkspaceSessionPatch', () => {
       [
         'activeFileIdByWorktree',
         'activeTabTypeByWorktree',
+        'editorTextDirectionByFile',
         'markdownFrontmatterVisible',
         'openFilesByWorktree'
       ].sort()
@@ -146,6 +149,20 @@ describe('buildWorkspaceSessionPatch', () => {
         dirtyDraftContent: 'edited'
       })
     )
+  })
+
+  it('prunes a per-file direction override for a file that is no longer open', () => {
+    const patch = buildWorkspaceSessionPatch(
+      createSnapshot({
+        editorTextDirectionByFile: {
+          '/tmp/demo.ts': 'rtl',
+          '/tmp/closed.md': 'rtl'
+        }
+      }),
+      ['editorTextDirectionByFile']
+    )
+
+    expect(patch.editorTextDirectionByFile).toEqual({ '/tmp/demo.ts': 'rtl' })
   })
 
   it('derives editor session keys when markdown front-matter visibility changes', () => {
@@ -163,6 +180,7 @@ describe('buildWorkspaceSessionPatch', () => {
       [
         'activeFileIdByWorktree',
         'activeTabTypeByWorktree',
+        'editorTextDirectionByFile',
         'markdownFrontmatterVisible',
         'openFilesByWorktree'
       ].sort()

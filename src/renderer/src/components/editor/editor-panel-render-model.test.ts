@@ -263,7 +263,7 @@ describe('canShowTextDirectionToggle', () => {
   it('stays hidden on diff surfaces, which have no editable content', () => {
     expect(
       renderModel({
-        activeFile: markdownFile({ mode: 'diff', diffSource: 'working-tree' }),
+        activeFile: markdownFile({ mode: 'diff', diffSource: 'unstaged' }),
         fileContents: { '/repo/README.md': textContent({ content: '\u05e9\u05dc\u05d5\u05dd' }) }
       }).canShowTextDirectionToggle
     ).toBe(false)
