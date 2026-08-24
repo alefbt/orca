@@ -33015,6 +33015,7 @@ export class OrcaRuntimeService {
     const tab = this.tabs.get(leaf.tabId) ?? null
 
     const pty = leaf.ptyId ? this.ptysById.get(leaf.ptyId) : undefined
+    const title = getLatestLeafTitle(leaf, tab?.title ?? null)
     // Why: leaf.connected mirrors the renderer graph (`ptyId !== null`), so a
     // restored surface whose PTY died with a prior run still reads connected.
     // Demote only on a controller-proven absence, and only for locally-scoped
@@ -33040,7 +33041,7 @@ export class OrcaRuntimeService {
       branch: worktree?.branch ?? '',
       tabId: leaf.tabId,
       leafId: leaf.leafId,
-      title: getLatestLeafTitle(leaf, tab?.title ?? null),
+      title,
       connected: provenAbsent ? false : leaf.connected,
       writable: provenAbsent ? false : leaf.writable,
       lastOutputAt: leaf.lastOutputAt,
@@ -33050,7 +33051,7 @@ export class OrcaRuntimeService {
       ...this.resolvePaneAgentIdentityField(
         pty?.launchAgent,
         pty?.foregroundAgent,
-        getLatestLeafTitle(leaf, tab?.title ?? null)
+        title
       )
     }
   }
@@ -35011,6 +35012,7 @@ export class OrcaRuntimeService {
     worktreesById: Map<string, ResolvedWorktree>
   ): RuntimeTerminalSummary {
     const worktree = worktreesById.get(pty.worktreeId)
+    const title = getLatestPtyTitle(pty)
 
     const pane = parsePaneKey(pty.paneKey ?? '')
     const orphaned = !pty.tabId || !pane || pane.tabId !== pty.tabId
@@ -35024,7 +35026,7 @@ export class OrcaRuntimeService {
       branch: worktree?.branch ?? '',
       tabId: orphaned ? `pty:${pty.ptyId}` : pty.tabId!,
       leafId: orphaned ? `pty:${pty.ptyId}` : pane.leafId,
-      title: getLatestPtyTitle(pty),
+      title,
       connected: pty.connected,
       writable: pty.connected,
       lastOutputAt: pty.lastOutputAt,
@@ -35034,7 +35036,7 @@ export class OrcaRuntimeService {
       ...this.resolvePaneAgentIdentityField(
         pty.launchAgent,
         pty.foregroundAgent,
-        getLatestPtyTitle(pty)
+        title
       )
     }
   }
