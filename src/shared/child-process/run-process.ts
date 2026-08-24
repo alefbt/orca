@@ -5,6 +5,7 @@ import {
   type SpawnOptions as NodeSpawnOptions
 } from 'node:child_process'
 import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windows-command-line'
+export type SpawnedProcess = ChildProcess
 
 /**
  * The single place Orca starts a child process.
