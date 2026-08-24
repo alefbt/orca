@@ -24,7 +24,8 @@ export type WebRuntimeSessionMocks = {
   moveUnifiedTabToGroup: SessionMock
   setRemoteBrowserPageHandle: SessionMock
   focusBrowserTabInWorktree: SessionMock
-  applyFreshWebSessionTabsSnapshot: SessionMock
+  applyWebSessionTabsSnapshot: SessionMock
+  decideWebSessionTabsSnapshot: SessionMock
   resolveHostSessionTabIdForWebSessionTab: SessionMock
   deliverLaunchPromptToAgentTab: SessionMock
   hasMaterializedWebRuntimeBrowserPage: SessionMock
@@ -166,7 +167,7 @@ export function stubBrowserTabCreateEnvironment(mocks: WebRuntimeSessionMocks): 
   mocks.subscribe.mockReturnValue(vi.fn())
   stubStagedBrowserTabStore(mocks)
   mocks.moveUnifiedTabToGroup.mockReturnValue(true)
-  mocks.applyFreshWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
+  mocks.applyWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
   mocks.resolveHostSessionTabIdForWebSessionTab.mockReturnValue(null)
   mocks.deliverLaunchPromptToAgentTab.mockResolvedValue(true)
   mocks.hasMaterializedWebRuntimeBrowserPage.mockReturnValue(true)
@@ -201,7 +202,7 @@ export function stubTerminalCreateEnvironment(mocks: WebRuntimeSessionMocks): vo
       activeWorktreeId: WORKTREE_ID
     })
   })
-  mocks.applyFreshWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
+  mocks.applyWebSessionTabsSnapshot.mockReturnValue({ state: 'after' })
   mocks.resolveHostSessionTabIdForWebSessionTab.mockReturnValue(null)
   mocks.deliverLaunchPromptToAgentTab.mockResolvedValue(true)
 }

@@ -552,6 +552,7 @@ describe('client-owned tab placement for paired worktrees', () => {
       placementMoves: [],
       rekeyedTabIds: new Map(),
       intentTabId: null,
+      reservedEmptyGroupFallbackTabId: null,
       currentActiveGroupId: PREVIEW_GROUP,
       currentLayout: SPLIT_LAYOUT,
       isGroupReserved: () => false

@@ -24,6 +24,13 @@ export type ClientOwnedPlacementInput = {
   rekeyedTabIds: ReadonlyMap<string, string>
   /** Explicit navigation intent (caller focus intent or 'follow'); the only focus authority. */
   intentTabId: string | null
+  /**
+   * The sibling tab to fall back to when the active group is a reserved preview split that
+   * nothing visible occupies (STA-5001). Open Preview to the Side activates the empty split
+   * before the host page lands; treating that as focus would move the user off the source
+   * they are still editing.
+   */
+  reservedEmptyGroupFallbackTabId: string | null
   currentActiveGroupId: string | null
   currentLayout: TabGroupLayoutNode | null
   isGroupReserved(groupId: string): boolean
@@ -238,8 +245,14 @@ export function reconcileClientOwnedTabPlacement(
   const intentGroupId = input.intentTabId
     ? (groups.find((group) => group.tabOrder.includes(input.intentTabId as string))?.id ?? null)
     : null
+  const reservedEmptyFallbackGroupId = input.reservedEmptyGroupFallbackTabId
+    ? (groups.find((group) =>
+        group.tabOrder.includes(input.reservedEmptyGroupFallbackTabId as string)
+      )?.id ?? null)
+    : null
   const nextActiveGroupId =
     intentGroupId ??
+    reservedEmptyFallbackGroupId ??
     (input.currentActiveGroupId && survivingGroupIds.has(input.currentActiveGroupId)
       ? input.currentActiveGroupId
       : (groups.find((group) => layoutGroupIds.has(group.id))?.id ?? groups[0]?.id ?? null))
