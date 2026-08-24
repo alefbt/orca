@@ -19,6 +19,10 @@ import type { TuiAgent } from './tui-agent'
  * ids they are different facts: in the bug both belong to the current run, and in the reclaim the
  * hook belongs to a previous one.
  *
+ * Generic over the agent vocabulary: the sidebar speaks the widened `AgentType` and the tab speaks
+ * the strict `TuiAgent`. Ranking evidence does not depend on which, and a cast at that boundary
+ * would only hide the mismatch.
+ *
  * A run is advanced only on positive evidence that a new agent started in the pane — an accepted
  * launch, a recognized command at a shell prompt, a host-confirmed foreground change, a new
  * provider session. Never by a title changing, and never by transport loss.
@@ -44,9 +48,9 @@ export type PaneAgentEvidenceSource = (typeof PANE_AGENT_EVIDENCE_SOURCES)[numbe
 /** Authority order, strongest first. Position here is the ONLY place precedence is expressed. */
 const SOURCE_RANK: readonly PaneAgentEvidenceSource[] = PANE_AGENT_EVIDENCE_SOURCES
 
-export type PaneAgentEvidence = {
+export type PaneAgentEvidence<A extends string = TuiAgent> = {
   source: PaneAgentEvidenceSource
-  agent: TuiAgent
+  agent: A
   /**
    * The agent run this evidence describes. Evidence whose run is not the pane's current run is
    * ineligible. Undefined means unknown — from an old peer that does not publish run ids, or an
@@ -55,8 +59,8 @@ export type PaneAgentEvidence = {
   runId?: number
 }
 
-export type PaneAgentIdentityInput = {
-  evidence: readonly PaneAgentEvidence[]
+export type PaneAgentIdentityInput<A extends string = TuiAgent> = {
+  evidence: readonly PaneAgentEvidence<A>[]
   /** The pane's current run. Undefined disables run filtering entirely (old peer, mixed version). */
   currentRunId?: number
   /**
@@ -66,8 +70,8 @@ export type PaneAgentIdentityInput = {
   allowSibling?: boolean
 }
 
-export type PaneAgentIdentity = {
-  agent: TuiAgent | null
+export type PaneAgentIdentity<A extends string = TuiAgent> = {
+  agent: A | null
   /** Which class of evidence decided it. Null when nothing eligible remained. */
   source: PaneAgentEvidenceSource | null
   /** Evidence discarded because it belongs to a superseded run. Surfaced for diagnostics. */
@@ -81,7 +85,9 @@ export type PaneAgentIdentity = {
  * recoverable; showing the wrong agent is not, and at the action surfaces (orchestration routing,
  * mailbox delivery, prompt-cache timers) it is a misdelivery rather than a cosmetic slip.
  */
-export function resolvePaneAgentIdentity(input: PaneAgentIdentityInput): PaneAgentIdentity {
+export function resolvePaneAgentIdentity<A extends string = TuiAgent>(
+  input: PaneAgentIdentityInput<A>
+): PaneAgentIdentity<A> {
   const superseded: PaneAgentEvidenceSource[] = []
   const eligible = input.evidence.filter((item) => {
     if (item.source === 'sibling' && input.allowSibling !== true) {
