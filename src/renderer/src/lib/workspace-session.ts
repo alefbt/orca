@@ -1,5 +1,10 @@
 import type { BrowserPage, BrowserWorkspace } from '../../../shared/browser-workspace-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
+import type { WorkspaceVisibleTabType } from '../../../shared/tab-types'
+import type {
+  PersistedOpenFile,
+  WorkspaceSessionState
+} from '../../../shared/workspace-session-state-types'
 import { pruneLocalTerminalScrollbackBuffers } from '../../../shared/workspace-session-terminal-buffers'
 import { normalizeBrowserHistoryEntries } from '../../../shared/workspace-session-browser-history'
 import type { AppState } from '../store'
@@ -8,6 +13,8 @@ import { buildLastVisitedAtByWorktreeId } from './workspace-session-focus-recenc
 import { buildSleepingAgentSessionData } from './workspace-session-sleeping-agents'
 import { buildActiveConnectionIdsAtShutdown } from './workspace-session-reconnect-targets'
 import { buildEditorSessionData } from './workspace-session-editor-data'
+import { withoutStagedBrowserTabs } from './workspace-session-staged-browser-tabs'
+import { buildBrowserSessionData } from './workspace-session-browser-tabs'
 
 export { buildActiveConnectionIdsAtShutdown }
 
@@ -38,6 +45,7 @@ export type WorkspaceSessionSnapshot = Pick<
   | 'browserPagesByWorkspace'
   | 'activeBrowserTabIdByWorktree'
   | 'browserUrlHistory'
+  | 'remoteBrowserPageHandlesByPageId'
   | 'unifiedTabsByWorktree'
   | 'groupsByWorktree'
   | 'layoutByWorktree'
@@ -51,6 +59,7 @@ export type WorkspaceSessionSnapshot = Pick<
 > & {
   activeWorkspaceExecutionHostId?: AppState['activeWorkspaceExecutionHostId']
   sleepingAgentSessionsByPaneKey?: AppState['sleepingAgentSessionsByPaneKey']
+  clientHostedBrowserCloseIntentsByEnvironment?: AppState['clientHostedBrowserCloseIntentsByEnvironment']
 }
 
 // Why: shallow-equality gate for the debounced session writer; _exhaustive below keeps it in sync with the snapshot type.
@@ -74,6 +83,7 @@ export const SESSION_RELEVANT_FIELDS = [
   'browserPagesByWorkspace',
   'activeBrowserTabIdByWorktree',
   'browserUrlHistory',
+  'remoteBrowserPageHandlesByPageId',
   'unifiedTabsByWorktree',
   'groupsByWorktree',
   'layoutByWorktree',
@@ -84,7 +94,8 @@ export const SESSION_RELEVANT_FIELDS = [
   'lastKnownRelayPtyIdByTabId',
   'lastVisitedAtByWorktreeId',
   'defaultTerminalTabsAppliedByWorktreeId',
-  'sleepingAgentSessionsByPaneKey'
+  'sleepingAgentSessionsByPaneKey',
+  'clientHostedBrowserCloseIntentsByEnvironment'
 ] as const satisfies readonly (keyof WorkspaceSessionSnapshot)[]
 
 type _MissingSessionField = Exclude<
@@ -129,6 +140,93 @@ export function buildPersistedBrowserPagesByWorkspace(
       pages.map((page) => ({ ...page, loading: false }))
     ])
   )
+/** Build the editor-file portion of the workspace session for persistence.
+ *  Only edit-mode files are saved — diffs and conflict views are transient. */
+export function buildEditorSessionData(
+  openFiles: OpenFile[],
+  editorDrafts: Record<string, string>,
+  markdownFrontmatterVisible: Record<string, boolean>,
+  activeFileIdByWorktree: Record<string, string | null>,
+  activeTabTypeByWorktree: Record<string, WorkspaceVisibleTabType>
+): Pick<
+  WorkspaceSessionState,
+  | 'openFilesByWorktree'
+  | 'activeFileIdByWorktree'
+  | 'activeTabTypeByWorktree'
+  | 'markdownFrontmatterVisible'
+> {
+  const editFiles = openFiles.filter((f) => f.mode === 'edit')
+  const byWorktree: Record<string, PersistedOpenFile[]> = {}
+  const editFileIdsByWorktree: Record<string, Set<string>> = {}
+  for (const f of editFiles) {
+    const arr = byWorktree[f.worktreeId] ?? (byWorktree[f.worktreeId] = [])
+    // Why: never persist a dirty draft for a read-only tab — restoring one would reintroduce writable/hot-exit state for an agent transcript.
+    const dirtyDraftContent = f.isDirty && f.readOnly !== true ? editorDrafts[f.id] : undefined
+    arr.push({
+      filePath: f.filePath,
+      relativePath: f.relativePath,
+      worktreeId: f.worktreeId,
+      language: f.language,
+      isPreview: f.isPreview || undefined,
+      runtimeEnvironmentId: f.runtimeEnvironmentId,
+      externalSshTargetId: f.externalSshTargetId,
+      // Why: persist readOnly only when true; absence is the writable default on restore.
+      ...(f.readOnly === true ? { readOnly: true } : {}),
+      ...(f.readOnly === true && f.liveTail === true ? { liveTail: true } : {}),
+      ...(dirtyDraftContent !== undefined ? { dirtyDraftContent } : {}),
+      // Why: baseline travels with the draft so restore can detect a changed-on-disk conflict before autosave clobbers an offline agent write.
+      ...(dirtyDraftContent !== undefined && f.lastKnownDiskSignature
+        ? { lastKnownDiskSignature: f.lastKnownDiskSignature }
+        : {})
+    })
+    const ids =
+      editFileIdsByWorktree[f.worktreeId] ?? (editFileIdsByWorktree[f.worktreeId] = new Set())
+    ids.add(f.id)
+  }
+
+  const activeFileEntries: [string, string][] = []
+  for (const [worktreeId, fileId] of Object.entries(activeFileIdByWorktree)) {
+    if (!fileId) {
+      continue
+    }
+    if (editFileIdsByWorktree[worktreeId]?.has(fileId)) {
+      activeFileEntries.push([worktreeId, fileId])
+    }
+  }
+  const persistedActiveFileIdByWorktree = Object.fromEntries(activeFileEntries) as Record<
+    string,
+    string
+  >
+
+  const activeTabTypeEntries: [string, WorkspaceVisibleTabType][] = []
+  for (const [worktreeId, tabType] of Object.entries(activeTabTypeByWorktree)) {
+    if (tabType !== 'editor') {
+      activeTabTypeEntries.push([worktreeId, tabType])
+      continue
+    }
+    // Why: only keep the "editor" marker when it points at a restored file, else startup has no real editor tab to select.
+    if (persistedActiveFileIdByWorktree[worktreeId]) {
+      activeTabTypeEntries.push([worktreeId, tabType])
+    }
+  }
+  const persistedActiveTabTypeByWorktree = Object.fromEntries(activeTabTypeEntries) as Record<
+    string,
+    WorkspaceVisibleTabType
+  >
+  const allEditFileIds = new Set(Object.values(editFileIdsByWorktree).flatMap((ids) => [...ids]))
+  // Why: preserve the value so per-file hide overrides survive restart (map only carries `false`; visible is the default).
+  const persistedMarkdownFrontmatterVisible = Object.fromEntries(
+    Object.entries(markdownFrontmatterVisible ?? {}).filter(([fileId]) =>
+      allEditFileIds.has(fileId)
+    )
+  )
+
+  return {
+    openFilesByWorktree: byWorktree,
+    activeFileIdByWorktree: persistedActiveFileIdByWorktree,
+    activeTabTypeByWorktree: persistedActiveTabTypeByWorktree,
+    markdownFrontmatterVisible: persistedMarkdownFrontmatterVisible
+  }
 }
 
 export function buildSanitizedTabsByWorktree(
@@ -200,8 +298,9 @@ export function buildTerminalSessionData(
 }
 
 export function buildWorkspaceSessionPayload(
-  snapshot: WorkspaceSessionSnapshot
+  fullSnapshot: WorkspaceSessionSnapshot
 ): WorkspaceSessionState {
+  const snapshot = withoutStagedBrowserTabs(fullSnapshot)
   const terminalSessionData = buildTerminalSessionData(snapshot)
 
   const payload = {
@@ -226,7 +325,8 @@ export function buildWorkspaceSessionPayload(
     ...buildBrowserSessionData(
       snapshot.browserTabsByWorktree,
       snapshot.browserPagesByWorkspace,
-      snapshot.activeBrowserTabIdByWorktree
+      snapshot.activeBrowserTabIdByWorktree,
+      snapshot.remoteBrowserPageHandlesByPageId
     ),
     // Why: enforce the history storage cap here so stale renderer state can't make every write stringify an oversized legacy array.
     browserUrlHistory: normalizeBrowserHistoryEntries(snapshot.browserUrlHistory),
@@ -244,7 +344,11 @@ export function buildWorkspaceSessionPayload(
       Object.keys(snapshot.defaultTerminalTabsAppliedByWorktreeId).length > 0
         ? snapshot.defaultTerminalTabsAppliedByWorktreeId
         : undefined,
-    ...buildSleepingAgentSessionData(snapshot)
+    ...buildSleepingAgentSessionData(snapshot),
+    // Why unconditional rather than omit-when-empty: a full write replaces the persisted object,
+    // so an emptied map has to be written as empty or the last replay never sticks.
+    clientHostedBrowserCloseIntentsByEnvironment:
+      snapshot.clientHostedBrowserCloseIntentsByEnvironment
   }
 
   return pruneLocalTerminalScrollbackBuffers(payload, snapshot.repos)
