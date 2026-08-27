@@ -1,6 +1,5 @@
-import type { BrowserPage, BrowserWorkspace } from '../../../shared/browser-workspace-types'
-import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import type { WorkspaceVisibleTabType } from '../../../shared/tab-types'
+import type { EditorTextDirectionOverride } from '../../../shared/editor-text-direction'
 import type {
   PersistedOpenFile,
   WorkspaceSessionState
@@ -8,11 +7,11 @@ import type {
 import { pruneLocalTerminalScrollbackBuffers } from '../../../shared/workspace-session-terminal-buffers'
 import { normalizeBrowserHistoryEntries } from '../../../shared/workspace-session-browser-history'
 import type { AppState } from '../store'
+import type { OpenFile } from '../store/slices/editor'
 import { buildPersistedUnifiedTabSessionData } from './workspace-session-unified-tabs'
 import { buildLastVisitedAtByWorktreeId } from './workspace-session-focus-recency'
 import { buildSleepingAgentSessionData } from './workspace-session-sleeping-agents'
 import { buildActiveConnectionIdsAtShutdown } from './workspace-session-reconnect-targets'
-import { buildEditorSessionData } from './workspace-session-editor-data'
 import { withoutStagedBrowserTabs } from './workspace-session-staged-browser-tabs'
 import { buildBrowserSessionData } from './workspace-session-browser-tabs'
 
@@ -104,42 +103,6 @@ type _MissingSessionField = Exclude<
 >
 void (true satisfies [_MissingSessionField] extends [never] ? true : never)
 
-export function buildBrowserSessionData(
-  browserTabsByWorktree: Record<string, BrowserWorkspace[]>,
-  browserPagesByWorkspace: Record<string, BrowserPage[]>,
-  activeBrowserTabIdByWorktree: Record<string, string | null>
-): Pick<
-  WorkspaceSessionState,
-  'browserTabsByWorktree' | 'browserPagesByWorkspace' | 'activeBrowserTabIdByWorktree'
-> {
-  return {
-    // Why: guest webContents are recreated on restore, so persist only lightweight chrome state (loading reset to false).
-    browserTabsByWorktree: buildPersistedBrowserTabsByWorktree(browserTabsByWorktree),
-    browserPagesByWorkspace: buildPersistedBrowserPagesByWorkspace(browserPagesByWorkspace),
-    activeBrowserTabIdByWorktree
-  }
-}
-
-export function buildPersistedBrowserTabsByWorktree(
-  browserTabsByWorktree: Record<string, BrowserWorkspace[]>
-): WorkspaceSessionState['browserTabsByWorktree'] {
-  return Object.fromEntries(
-    Object.entries(browserTabsByWorktree).map(([worktreeId, tabs]) => [
-      worktreeId,
-      tabs.map((tab) => ({ ...tab, loading: false }))
-    ])
-  )
-}
-
-export function buildPersistedBrowserPagesByWorkspace(
-  browserPagesByWorkspace: Record<string, BrowserPage[]>
-): WorkspaceSessionState['browserPagesByWorkspace'] {
-  return Object.fromEntries(
-    Object.entries(browserPagesByWorkspace).map(([workspaceId, pages]) => [
-      workspaceId,
-      pages.map((page) => ({ ...page, loading: false }))
-    ])
-  )
 /** Build the editor-file portion of the workspace session for persistence.
  *  Only edit-mode files are saved — diffs and conflict views are transient. */
 export function buildEditorSessionData(
@@ -147,13 +110,15 @@ export function buildEditorSessionData(
   editorDrafts: Record<string, string>,
   markdownFrontmatterVisible: Record<string, boolean>,
   activeFileIdByWorktree: Record<string, string | null>,
-  activeTabTypeByWorktree: Record<string, WorkspaceVisibleTabType>
+  activeTabTypeByWorktree: Record<string, WorkspaceVisibleTabType>,
+  editorTextDirectionByFile: Record<string, EditorTextDirectionOverride>
 ): Pick<
   WorkspaceSessionState,
   | 'openFilesByWorktree'
   | 'activeFileIdByWorktree'
   | 'activeTabTypeByWorktree'
   | 'markdownFrontmatterVisible'
+  | 'editorTextDirectionByFile'
 > {
   const editFiles = openFiles.filter((f) => f.mode === 'edit')
   const byWorktree: Record<string, PersistedOpenFile[]> = {}
@@ -221,11 +186,16 @@ export function buildEditorSessionData(
     )
   )
 
+  const persistedEditorTextDirectionByFile = Object.fromEntries(
+    Object.entries(editorTextDirectionByFile ?? {}).filter(([fileId]) => allEditFileIds.has(fileId))
+  )
+
   return {
     openFilesByWorktree: byWorktree,
     activeFileIdByWorktree: persistedActiveFileIdByWorktree,
     activeTabTypeByWorktree: persistedActiveTabTypeByWorktree,
-    markdownFrontmatterVisible: persistedMarkdownFrontmatterVisible
+    markdownFrontmatterVisible: persistedMarkdownFrontmatterVisible,
+    editorTextDirectionByFile: persistedEditorTextDirectionByFile
   }
 }
 

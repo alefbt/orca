@@ -27,12 +27,12 @@ import {
   browserWorkspaceSchema
 } from './workspace-session-browser-schema'
 import {
-  editorTextDirectionOverrideSchema,
+  editorTextDirectionByFileField,
+  markdownFrontmatterVisibleField,
   persistedOpenFileSchema
 } from './workspace-session-editor-schema'
 import { clientHostedBrowserCloseIntentSchema } from './client-hosted-browser-close-intent'
 import { persistedClientHostedBrowserPageSchema } from './client-hosted-browser-page-record'
-import { persistedOpenFileSchema } from './workspace-session-editor-schema'
 import { sleepingAgentSessionsByPaneKeySchema } from './workspace-session-sleeping-agents'
 import { salvagedField, salvagedOptional, salvagingArray, salvagingRecord } from './zod-salvage'
 
@@ -236,14 +236,8 @@ export const workspaceSessionStateSchema: z.ZodType<WorkspaceSessionState> = z.o
     'activeFileIdByWorktree',
     salvagingRecord(worktreeIdSchema, z.string().nullable())
   ),
-  markdownFrontmatterVisible: salvagedOptional(
-    'markdownFrontmatterVisible',
-    salvagingRecord(z.string(), z.boolean())
-  ),
-  editorTextDirectionByFile: salvagedOptional(
-    'editorTextDirectionByFile',
-    salvagingRecord(z.string(), editorTextDirectionOverrideSchema)
-  ),
+  markdownFrontmatterVisible: markdownFrontmatterVisibleField,
+  editorTextDirectionByFile: editorTextDirectionByFileField,
   browserTabsByWorktree: salvagedOptional(
     'browserTabsByWorktree',
     salvagingRecord(worktreeIdSchema, salvagingArray(browserWorkspaceSchema))

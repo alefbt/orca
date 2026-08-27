@@ -1,9 +1,8 @@
 /* Why: the editor slice of the persisted workspace session. Split out of
- * workspace-session-schema.ts to keep that file inside its line budget, matching
- * workspace-session-browser-schema.ts; the schemas themselves are unchanged. */
  * workspace-session-schema.ts to keep that file inside its line budget, the
  * same way the browser slice already is; the schema itself is unchanged. */
 import { z } from 'zod'
+import { salvagedOptional, salvagingRecord } from './zod-salvage'
 
 export const persistedOpenFileSchema = z.object({
   filePath: z.string(),
@@ -20,3 +19,15 @@ export const persistedOpenFileSchema = z.object({
 })
 
 export const editorTextDirectionOverrideSchema = z.enum(['ltr', 'rtl'])
+
+/** Per-file front-matter visibility; only `false` entries are persisted. */
+export const markdownFrontmatterVisibleField = salvagedOptional(
+  'markdownFrontmatterVisible',
+  salvagingRecord(z.string(), z.boolean())
+)
+
+/** Per-file document-direction override; absent means follow settings.editorTextDirection. */
+export const editorTextDirectionByFileField = salvagedOptional(
+  'editorTextDirectionByFile',
+  salvagingRecord(z.string(), editorTextDirectionOverrideSchema)
+)

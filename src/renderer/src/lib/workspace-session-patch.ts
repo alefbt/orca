@@ -4,11 +4,8 @@ import type {
 } from '../../../shared/workspace-session-state-types'
 import { pruneLocalTerminalScrollbackBuffers } from '../../../shared/workspace-session-terminal-buffers'
 import { normalizeBrowserHistoryEntries } from '../../../shared/workspace-session-browser-history'
-import { buildEditorSessionData } from './workspace-session-editor-data'
 import {
   buildActiveConnectionIdsAtShutdown,
-  buildPersistedBrowserPagesByWorkspace,
-  buildPersistedBrowserTabsByWorktree,
   buildEditorSessionData,
   buildSanitizedTabsByWorktree,
   buildTerminalSessionData,
