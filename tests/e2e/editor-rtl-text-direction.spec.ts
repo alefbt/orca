@@ -71,7 +71,20 @@ test('reveals and applies the RTL text-direction toggle for a Hebrew file', asyn
       return text.left - box.left <= box.right - text.right ? 'left' : 'right'
     })
 
+  // Alignment alone cannot tell `direction: rtl` from a bare `text-align: right`, and would not
+  // notice 'auto' doing nothing, so pair it with the computed style that must be in effect.
+  const lineDirectionStyle = async (): Promise<{ direction: string; unicodeBidi: string }> =>
+    orcaPage.evaluate(() => {
+      const view = document.querySelector('.view-line')
+      if (!view) {
+        throw new Error('no rendered lines')
+      }
+      const style = getComputedStyle(view)
+      return { direction: style.direction, unicodeBidi: style.unicodeBidi }
+    })
+
   expect(await lineTextAlignment()).toBe('left')
+  expect(await lineDirectionStyle()).toMatchObject({ direction: 'ltr' })
 
   // The toggle only appears because the file holds strong RTL text.
   const directionButton = orcaPage.getByRole('button', { name: 'Text Direction' })
@@ -96,14 +109,25 @@ test('reveals and applies the RTL text-direction toggle for a Hebrew file', asyn
 
   // The visible effect of 'rtl': the document's lines become flush right.
   expect(await lineTextAlignment()).toBe('right')
+  // Proves the lines really carry `direction: rtl`, not just an alignment change.
+  expect(await lineDirectionStyle()).toMatchObject({ direction: 'rtl' })
 
   const rtlShot = testInfo.outputPath('editor-direction-rtl.png')
   await monaco.screenshot({ path: rtlShot })
   await testInfo.attach('editor-direction-rtl', { path: rtlShot, contentType: 'image/png' })
 
-  // Text stays selectable and the caret still lands, so RTL is not a read-only mode.
-  await orcaPage.locator('.view-line').first().click()
-  await expect(monaco).toBeVisible()
+  // The caret must actually land in RTL, not merely accept the pointer event: Orca mirrors
+  // Monaco's cursor line into the store, so assert it moved to the clicked line.
+  await orcaPage.evaluate((id) => {
+    window.__store?.getState().setEditorCursorLine(id, 1)
+  }, fileId)
+  await orcaPage.locator('.view-line').nth(1).click()
+  await expect
+    .poll(
+      () => orcaPage.evaluate((id) => window.__store?.getState().editorCursorLine[id], fileId),
+      { timeout: 10_000 }
+    )
+    .toBe(2)
 
   // Toggling back drops the override rather than pinning an explicit 'ltr'.
   await directionButton.click()
@@ -126,6 +150,11 @@ test('reveals and applies the RTL text-direction toggle for a Hebrew file', asyn
   // 'auto' sets each line's base direction from its first strong character without right-aligning,
   // so alignment stays left while the class is applied.
   expect(await lineTextAlignment()).toBe('left')
+  // Asserting `unicode-bidi: plaintext` is what stops this passing when 'auto' does nothing.
+  expect(await lineDirectionStyle()).toMatchObject({
+    direction: 'ltr',
+    unicodeBidi: 'plaintext'
+  })
 
   const autoShot = testInfo.outputPath('editor-direction-auto.png')
   await monaco.screenshot({ path: autoShot })
